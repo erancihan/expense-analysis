@@ -1,0 +1,16 @@
+# Example local config file. Copy this to config.local.yaml and edit.
+# Any values here override the defaults in src/config.py.
+
+# database_url: "sqlite:///data/expenses.db"
+# gmail_credentials_path: "secrets/credentials.json"
+# gmail_token_path: "secrets/token.json"
+# check_interval_minutes: 30
+
+# bank_config:
+#   isbank:
+#     senders:
+#       - bilgilendirme@ileti.isbank.com.tr
+#     subject_keywords:
+#       - Ekstre
+#       - Kredi Kartı Hesap Özeti
+#     parser_class: src.parsers.isbank.IsbankParser
