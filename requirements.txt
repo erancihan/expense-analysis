@@ -1,9 +1,12 @@
 sqlalchemy
+alembic
 pypdf
 pdfminer.six
+beautifulsoup4
 google-api-python-client
 google-auth-httplib2
 google-auth-oauthlib
 schedule
 python-dotenv
 pyyaml
+flask

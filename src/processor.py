@@ -137,11 +137,12 @@ class ExpenseProcessor:
                         for tx in transactions:
                             expense = Expense(
                                 date=tx['date'],
-                                description=tx['description'],
+                                description=tx['description'].strip(),
                                 amount=tx['amount'],
                                 currency=tx.get('currency', 'TRY'),
                                 category=tx.get('category'),
                                 bank_source=bank_id,
+                                card_number=tx.get('card_number', ''),
                                 raw_text=tx.get('raw_text')
                             )
                             db.add(expense)

@@ -11,7 +11,10 @@ engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False} i
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def init_db():
-    Base.metadata.create_all(bind=engine)
+    """Initialize database connection. Schema is managed by Alembic migrations."""
+    # Schema managed by Alembic — run `make migrations` to apply.
+    # Do NOT call Base.metadata.create_all() here.
+    pass
 
 def get_db():
     db = SessionLocal()

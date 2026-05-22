@@ -1,2 +1,13 @@
 venv
 config.local.yaml
+data/pdfs/
+data/expenses.db
+data/expenses.db-shm
+data/expenses.db-wal
+data/seeds/*
+!data/seeds/.gitkeep
+!data/seeds/*.example
+temp/
+__pycache__/
+*.pyc
+.env

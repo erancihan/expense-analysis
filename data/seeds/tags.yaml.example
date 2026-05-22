@@ -1,0 +1,121 @@
+# Tag Defaults Configuration
+#
+# This file defines the default tags and matching rules for auto-categorizing
+# expenses. Copy this to data/tag_defaults.yaml and customize.
+#
+# Tags: (name, color, icon)
+# Rules: (tag_name, pattern, match_type, priority)
+#   - match_type: contains | starts_with | regex
+#   - priority: higher = checked first. Default rules use 0-10, user overrides use 100+
+#
+# NOTE: This file may contain merchant names that reveal personal spending.
+#       data/tag_defaults.yaml is gitignored to keep it private.
+
+tags:
+  - name: restaurant
+    color: "#ef4444"
+    icon: "🍽️"
+  - name: grocery
+    color: "#22c55e"
+    icon: "🛒"
+  - name: transport
+    color: "#3b82f6"
+    icon: "🚕"
+  - name: gas
+    color: "#f97316"
+    icon: "⛽"
+  - name: entertainment
+    color: "#a855f7"
+    icon: "🎮"
+  - name: subscription
+    color: "#6366f1"
+    icon: "💻"
+  - name: shopping
+    color: "#ec4899"
+    icon: "🛍️"
+  - name: food_delivery
+    color: "#f59e0b"
+    icon: "🍕"
+  - name: payment
+    color: "#10b981"
+    icon: "💳"
+  - name: bills
+    color: "#64748b"
+    icon: "🏛️"
+  - name: transit
+    color: "#0ea5e9"
+    icon: "🚇"
+  - name: cafe
+    color: "#78716c"
+    icon: "☕"
+  - name: health
+    color: "#14b8a6"
+    icon: "🏥"
+  - name: education
+    color: "#8b5cf6"
+    icon: "📚"
+
+rules:
+  # restaurant
+  - tag: restaurant
+    pattern: "KEBAP"
+    match_type: contains
+    priority: 5
+  - tag: restaurant
+    pattern: "BURGER"
+    match_type: contains
+    priority: 5
+  - tag: restaurant
+    pattern: "SUBWAY"
+    match_type: contains
+    priority: 5
+
+  # grocery
+  - tag: grocery
+    pattern: "MIGROS"
+    match_type: contains
+    priority: 5
+  - tag: grocery
+    pattern: "BIM A.S"
+    match_type: contains
+    priority: 5
+
+  # entertainment
+  - tag: entertainment
+    pattern: "NETFLIX"
+    match_type: contains
+    priority: 5
+  - tag: entertainment
+    pattern: "DISNEY"
+    match_type: contains
+    priority: 5
+  - tag: entertainment
+    pattern: "SPOTIFY"
+    match_type: contains
+    priority: 5
+
+  # subscription
+  - tag: subscription
+    pattern: "APPLE.COM/BILL"
+    match_type: contains
+    priority: 5
+  - tag: subscription
+    pattern: "GITHUB"
+    match_type: contains
+    priority: 5
+
+  # food_delivery
+  - tag: food_delivery
+    pattern: "YEMEKSEPETI"
+    match_type: contains
+    priority: 5
+  - tag: food_delivery
+    pattern: "GETIR"
+    match_type: contains
+    priority: 5
+
+  # payment
+  - tag: payment
+    pattern: "HESAPTAN AKTARIM"
+    match_type: contains
+    priority: 10

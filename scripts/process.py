@@ -1,22 +1,32 @@
+#!/usr/bin/env python3
+"""
+Run the Gmail expense processor (poll for new bank statement emails).
+
+Usage:
+    ./scripts/process.py                 # Run with scheduler
+    ./scripts/process.py --manual        # Step through emails one by one
+"""
+
 import argparse
 import logging
 import time
-import schedule
-from src.database import init_db
+import sys
+import os
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import schedule as schedule_lib
 from src.processor import ExpenseProcessor
 from src.config import CHECK_INTERVAL_MINUTES
-import sys
 
-# Configure Logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)-35s - %(levelname)-7s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout)
-    ]
+    handlers=[logging.StreamHandler(sys.stdout)]
 )
 
 logger = logging.getLogger(__name__)
+
 
 def main():
     parser = argparse.ArgumentParser(description='Expense Analysis Application')
@@ -25,7 +35,6 @@ def main():
     args = parser.parse_args()
 
     logger.info("Initializing Expense Analysis Application...")
-    init_db()
 
     processor = ExpenseProcessor(manual=args.manual)
 
@@ -35,12 +44,13 @@ def main():
     else:
         processor.process()
 
-        schedule.every(CHECK_INTERVAL_MINUTES).minutes.do(processor.process)
+        schedule_lib.every(CHECK_INTERVAL_MINUTES).minutes.do(processor.process)
         logger.info(f"Scheduler started. Running every {CHECK_INTERVAL_MINUTES} minutes.")
 
         while True:
-            schedule.run_pending()
+            schedule_lib.run_pending()
             time.sleep(1)
 
-if __name__ == "__main__":
+
+if __name__ == '__main__':
     main()
