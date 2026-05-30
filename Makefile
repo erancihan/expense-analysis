@@ -92,7 +92,7 @@ add-tag: install
 
 ## Run tests
 test: install
-	$(PYTHON) -m pytest tests/ -v
+	$(PYTHON) -m unittest discover -s tests -v
 
 ## ── Cleanup ─────────────────────────────────────────────────────
 

@@ -1,0 +1,127 @@
+<!-- Expenses table with filters, card tabs, pagination -->
+<section class="glass-card rounded-2xl p-6 mb-8">
+    <div class="flex items-center justify-between flex-wrap gap-4 mb-4">
+        <h2 class="text-lg font-semibold text-slate-200">Expenses</h2>
+
+        <!-- Filters -->
+        <div class="flex items-center gap-3 flex-wrap">
+            <input type="text" x-model.debounce.300ms="searchQuery" @input="fetchExpenses()"
+                   placeholder="Search descriptions..."
+                   class="bg-slate-800/60 border border-slate-700 rounded-lg px-3 py-1.5 text-sm w-56 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none placeholder-slate-500">
+
+            <select x-model="filterTag" @change="fetchExpenses()"
+                    class="bg-slate-800/60 border border-slate-700 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+                <option value="">All Tags</option>
+                <template x-for="tag in tags" :key="tag.id">
+                    <option :value="tag.name" x-text="tag.icon + ' ' + tag.name"></option>
+                </template>
+            </select>
+
+            </div>
+    </div>
+    <!-- Card Tabs -->
+    <div class="flex items-center gap-1 mb-4 overflow-x-auto border-b border-slate-700/50">
+        <button @click="filterCard = ''; fetchExpenses()"
+                :class="filterCard === '' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-slate-500 hover:text-slate-300 hover:border-slate-600'"
+                class="px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap">
+            All Cards
+        </button>
+        <template x-for="card in cards" :key="card.card_number">
+            <button @click="filterCard = card.card_number; fetchExpenses()"
+                    :class="filterCard === card.card_number ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-slate-500 hover:text-slate-300 hover:border-slate-600'"
+                    class="px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap"
+                    x-text="card.masked">
+            </button>
+        </template>
+    </div>
+
+    <!-- Table -->
+    <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="border-b border-slate-700/50">
+                    <th class="text-left py-3 px-3 text-xs text-slate-400 uppercase tracking-wider font-medium">Date</th>
+                    <th class="text-left py-3 px-3 text-xs text-slate-400 uppercase tracking-wider font-medium">Description</th>
+                    <th class="text-right py-3 px-3 text-xs text-slate-400 uppercase tracking-wider font-medium">Amount</th>
+                    <th class="text-left py-3 px-3 text-xs text-slate-400 uppercase tracking-wider font-medium">Tags</th>
+                    <th class="text-left py-3 px-3 text-xs text-slate-400 uppercase tracking-wider font-medium">Card</th>
+                    <th class="py-3 px-3 w-10"></th>
+                </tr>
+            </thead>
+            <tbody>
+                <template x-for="exp in expenses" :key="exp.id">
+                    <tr class="expense-row border-b border-slate-800/50">
+                        <td class="py-2.5 px-3 text-slate-300 whitespace-nowrap" x-text="exp.date"></td>
+                        <td class="py-2.5 px-3 text-slate-200 max-w-md truncate" :title="exp.description" x-text="exp.description"></td>
+                        <td class="py-2.5 px-3 text-right whitespace-nowrap font-mono"
+                            :class="exp.amount < 0 ? 'text-emerald-400' : 'text-slate-200'">
+                            <span x-text="formatAmount(exp.amount, exp.currency)"></span>
+                        </td>
+                        <td class="py-2.5 px-3">
+                            <div class="flex gap-1 flex-wrap items-center">
+                                <!-- Active Tags -->
+                                <template x-for="tag in exp.tags.filter(t => t.source !== 'suppressed')" :key="tag.name">
+                                    <span class="tag-chip inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-xs font-medium cursor-default"
+                                          :style="'background-color:' + tag.color + '22; color:' + tag.color + '; border: 1px solid ' + tag.color + '44'"
+                                          :title="'Source: ' + tag.source">
+                                        <span x-text="tag.icon"></span>
+                                        <span x-text="tag.name"></span>
+                                    </span>
+                                </template>
+                                
+                                <!-- Suppressed Tags Indicator -->
+                                <template x-if="exp.tags.some(t => t.source === 'suppressed')">
+                                    <span class="inline-flex items-center justify-center h-5 px-1.5 rounded-full bg-slate-800 border border-slate-700 text-slate-500 text-[10px] font-medium cursor-help"
+                                          title="Contains hidden tags">
+                                        <span x-text="'+' + exp.tags.filter(t => t.source === 'suppressed').length"></span>
+                                    </span>
+                                </template>
+                            </div>
+                        </td>
+                        <td class="py-2.5 px-3 text-slate-500 text-xs" x-text="exp.card_number"></td>
+                        <td class="py-2.5 px-3 text-right">
+                            <button @click="openManageTags(exp)" title="Expense Details"
+                                    class="inline-flex items-center justify-center w-6 h-6 rounded-md text-slate-500 hover:text-indigo-400 hover:bg-slate-800 transition-colors">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h.01M12 12h.01M19 12h.01M6 12a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0z"></path></svg>
+                            </button>
+                        </td>
+                    </tr>
+                </template>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Empty state -->
+    <div x-show="expenses.length === 0 && !loading" class="text-center py-12 text-slate-500">
+        No expenses found for the selected filters.
+    </div>
+
+    <!-- Loading -->
+    <div x-show="loading" class="text-center py-12 text-slate-500">
+        <svg class="animate-spin h-6 w-6 mx-auto text-indigo-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+        </svg>
+    </div>
+
+    <!-- Pagination -->
+    <div class="flex items-center justify-between mt-4 pt-4 border-t border-slate-800/50">
+        <p class="text-sm text-slate-400">
+            Showing <span x-text="((page - 1) * perPage) + 1"></span>–<span x-text="Math.min(page * perPage, totalExpenses)"></span>
+            of <span x-text="totalExpenses.toLocaleString()"></span>
+        </p>
+        <div class="flex items-center gap-2">
+            <button @click="prevPage()" :disabled="page <= 1"
+                    class="btn-press bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed px-3 py-1.5 rounded-lg text-sm transition-colors">
+                ← Prev
+            </button>
+            <span class="text-sm text-slate-400 px-2">
+                Page <span x-text="page"></span> of <span x-text="totalPages"></span>
+            </span>
+            <button @click="nextPage()" :disabled="page >= totalPages"
+                    class="btn-press bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed px-3 py-1.5 rounded-lg text-sm transition-colors">
+                Next →
+            </button>
+        </div>
+    </div>
+</section>

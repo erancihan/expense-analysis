@@ -6,7 +6,7 @@ from src.gmail_client import GmailClient
 from src.database import get_db
 from src.models import Expense, ProcessedEmail
 from src.config import BANK_CONFIG
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +80,7 @@ class ExpenseProcessor:
                     db.add(processed)
                 else:
                     existing.status = 'SUCCESS'
-                    existing.processed_at = datetime.utcnow()
+                    existing.processed_at = datetime.now(timezone.utc).replace(tzinfo=None)
                 db.commit()
             except Exception as e:
                 logger.error(f"Failed to process message {message_id}: {e}")

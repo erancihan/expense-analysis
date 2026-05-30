@@ -10,7 +10,7 @@ import os
 from datetime import datetime, timedelta
 from functools import wraps
 
-from flask import Flask, jsonify, request, send_from_directory, Response
+from flask import Flask, jsonify, request, send_from_directory, render_template, Response
 from sqlalchemy import func, extract
 from sqlalchemy.orm import Session
 
@@ -23,8 +23,9 @@ logger = logging.getLogger(__name__)
 # ── App setup ────────────────────────────────────────────────────────────────
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'static')
+TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'templates')
 
-app = Flask(__name__, static_folder=STATIC_DIR)
+app = Flask(__name__, static_folder=STATIC_DIR, template_folder=TEMPLATE_DIR)
 app.json.ensure_ascii = False
 
 
@@ -67,7 +68,7 @@ def with_db(f):
 
 @app.route('/')
 def index():
-    return send_from_directory(STATIC_DIR, 'index.html')
+    return render_template('index.html')
 
 def parse_date_filter(date_str: str, is_end: bool = False):
     if not date_str: return None

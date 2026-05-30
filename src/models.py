@@ -3,7 +3,10 @@ from sqlalchemy import (
     ForeignKey, UniqueConstraint, create_engine,
 )
 from sqlalchemy.orm import declarative_base, relationship
-from datetime import datetime
+from datetime import datetime, timezone
+
+def utc_now():
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 Base = declarative_base()
 
@@ -21,7 +24,7 @@ class Expense(Base):
     card_number = Column(String, nullable=True)
     statement_period = Column(String, nullable=True)  # YYYY-MM from source PDF
     raw_text = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
 
     # Many-to-many relationship with Tag through ExpenseTag
     expense_tags = relationship('ExpenseTag', back_populates='expense', cascade='all, delete-orphan')
@@ -38,7 +41,7 @@ class Tag(Base):
     color = Column(String, default='#6366f1')                # hex color for UI chip
     icon = Column(String, default='🏷️')                      # emoji
     is_default = Column(Boolean, default=False)              # shipped with app
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
 
     # Relationships
     expense_tags = relationship('ExpenseTag', back_populates='tag', cascade='all, delete-orphan')
@@ -66,7 +69,7 @@ class TagRule(Base):
     match_type = Column(String, default='contains')          # contains | starts_with | regex
     priority = Column(Integer, default=0)                    # higher = checked first
     is_default = Column(Boolean, default=False)              # shipped rule vs user rule
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
 
     tag = relationship('Tag', back_populates='rules')
 
@@ -109,7 +112,7 @@ class ProcessedEmail(Base):
 
     id = Column(Integer, primary_key=True)
     message_id = Column(String, unique=True, nullable=False)
-    processed_at = Column(DateTime, default=datetime.utcnow)
+    processed_at = Column(DateTime, default=utc_now)
     status = Column(String, default='SUCCESS') # SUCCESS, FAILED
 
     def __repr__(self):

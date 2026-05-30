@@ -1,0 +1,103 @@
+<!-- Tag Management collapsible section -->
+<section class="glass-card rounded-2xl p-6 mb-8" x-data="{ open: false }">
+    <button @click="open = !open" class="flex items-center justify-between w-full text-left">
+        <h2 class="text-lg font-semibold text-slate-200">Tag Management</h2>
+        <svg class="w-5 h-5 text-slate-400 transition-transform" :class="open && 'rotate-180'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+        </svg>
+    </button>
+
+    <div x-show="open" x-collapse class="mt-6 space-y-6">
+        <!-- Tags list -->
+        <div>
+            <h3 class="text-sm font-medium text-slate-400 uppercase tracking-wider mb-3">Tags</h3>
+            <div class="flex flex-wrap gap-2">
+                <template x-for="tag in tags" :key="tag.id">
+                    <button type="button" @click="openEditTag(tag)" class="tag-chip inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-sm font-medium hover:scale-105 transition-transform focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-900"
+                          :style="'background-color:' + tag.color + '22; color:' + tag.color + '; border: 1px solid ' + tag.color + '44'">
+                        <span x-text="tag.icon"></span>
+                        <span x-text="tag.name"></span>
+                        <span x-show="tag.is_default" class="text-xs opacity-50">(default)</span>
+                    </button>
+                </template>
+            </div>
+        </div>
+
+        <!-- Tag Rules -->
+        <div>
+            <div class="flex items-center justify-between mb-3">
+                <h3 class="text-sm font-medium text-slate-400 uppercase tracking-wider">Rules</h3>
+                <button @click="retag()"
+                        class="btn-press bg-amber-600/20 hover:bg-amber-600/30 text-amber-400 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border border-amber-600/30">
+                    🔄 Re-tag All
+                </button>
+            </div>
+
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="border-b border-slate-700/50">
+                            <th class="text-left py-2 px-2 text-xs text-slate-500">Pattern</th>
+                            <th class="text-left py-2 px-2 text-xs text-slate-500">Type</th>
+                            <th class="text-left py-2 px-2 text-xs text-slate-500">Tag</th>
+                            <th class="text-left py-2 px-2 text-xs text-slate-500">Priority</th>
+                            <th class="text-left py-2 px-2 text-xs text-slate-500">Source</th>
+                            <th class="text-right py-2 px-2 text-xs text-slate-500 w-12"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="rule in tagRules" :key="rule.id">
+                            <tr class="border-b border-slate-800/30">
+                                <td class="py-1.5 px-2 font-mono text-xs text-slate-300" x-text="rule.pattern"></td>
+                                <td class="py-1.5 px-2 text-xs text-slate-500" x-text="rule.match_type"></td>
+                                <td class="py-1.5 px-2 text-xs" x-text="rule.tag_name"></td>
+                                <td class="py-1.5 px-2 text-xs text-slate-500" x-text="rule.priority"></td>
+                                <td class="py-1.5 px-2 text-xs" :class="rule.is_default ? 'text-slate-600' : 'text-indigo-400'" x-text="rule.is_default ? 'default' : 'user'"></td>
+                                <td class="py-1.5 px-2 text-right">
+                                    <button @click="deleteRule(rule.id)" class="text-slate-500 hover:text-rose-400 focus:outline-none transition-colors" title="Delete Rule">
+                                        <svg class="w-4 h-4 inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                                    </button>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Add Rule Form -->
+        <div class="border-t border-slate-700/50 pt-4">
+            <h3 class="text-sm font-medium text-slate-400 uppercase tracking-wider mb-3">Add Rule</h3>
+            <div class="flex items-end gap-3 flex-wrap">
+                <div>
+                    <label class="block text-xs text-slate-500 mb-1">Pattern</label>
+                    <input type="text" x-model="newRule.pattern" placeholder="e.g. STARBUCKS"
+                           class="bg-slate-800/60 border border-slate-700 rounded-lg px-3 py-1.5 text-sm w-48 focus:ring-2 focus:ring-indigo-500 outline-none">
+                </div>
+                <div>
+                    <label class="block text-xs text-slate-500 mb-1">Tag</label>
+                    <select x-model="newRule.tag_id"
+                            class="bg-slate-800/60 border border-slate-700 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+                        <option value="">Select...</option>
+                        <template x-for="tag in tags" :key="tag.id">
+                            <option :value="tag.id" x-text="tag.icon + ' ' + tag.name"></option>
+                        </template>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs text-slate-500 mb-1">Match</label>
+                    <select x-model="newRule.match_type"
+                            class="bg-slate-800/60 border border-slate-700 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+                        <option value="contains">contains</option>
+                        <option value="starts_with">starts_with</option>
+                        <option value="regex">regex</option>
+                    </select>
+                </div>
+                <button @click="addRule()"
+                        class="btn-press bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-1.5 rounded-lg text-sm font-medium transition-colors">
+                    Add Rule
+                </button>
+            </div>
+        </div>
+    </div>
+</section>

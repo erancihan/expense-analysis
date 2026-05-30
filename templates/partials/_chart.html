@@ -1,0 +1,22 @@
+<!-- Monthly spending chart with range selector -->
+<section class="glass-card rounded-2xl p-6 mb-8">
+    <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-semibold text-slate-200">Monthly Spending</h2>
+        <!-- Chart Range Selector -->
+        <div class="flex items-center rounded-lg border border-slate-700/50 overflow-hidden text-xs font-medium">
+            <button @click="setChartRange('1m')"
+                    :class="chartRange === '1m' ? 'bg-indigo-600 text-white' : 'bg-slate-800/60 text-slate-400 hover:text-slate-200 hover:bg-slate-700/50'"
+                    class="px-3 py-1.5 transition-colors">Month</button>
+            <button @click="setChartRange('1y')"
+                    :class="chartRange === '1y' ? 'bg-indigo-600 text-white' : 'bg-slate-800/60 text-slate-400 hover:text-slate-200 hover:bg-slate-700/50'"
+                    class="px-3 py-1.5 transition-colors border-l border-slate-700/50">Year</button>
+            <button @click="setChartRange('2y')"
+                    :class="chartRange === '2y' ? 'bg-indigo-600 text-white' : 'bg-slate-800/60 text-slate-400 hover:text-slate-200 hover:bg-slate-700/50'"
+                    class="px-3 py-1.5 transition-colors border-l border-slate-700/50">2 Years</button>
+            <button @click="setChartRange('5y')"
+                    :class="chartRange === '5y' ? 'bg-indigo-600 text-white' : 'bg-slate-800/60 text-slate-400 hover:text-slate-200 hover:bg-slate-700/50'"
+                    class="px-3 py-1.5 transition-colors border-l border-slate-700/50">5 Years</button>
+        </div>
+    </div>
+    <div id="monthlyChart" class="w-full" style="height: 380px;"></div>
+</section>
