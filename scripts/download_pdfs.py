@@ -2,12 +2,16 @@
 """
 Download all PDF attachments from İşbank emails to data/pdfs/.
 
+Saves each PDF with a structured filename:
+    bank(isbank),date(2019-06-07),emailid(18abc123def),card(6152).pdf
+
 Usage:
     ./scripts/download_pdfs.py
     make download-pdfs
 """
 
 import os
+import re
 import sys
 import logging
 from email.utils import parsedate_to_datetime
@@ -25,6 +29,20 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 SAVE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'pdfs')
+
+# Matches card number patterns like "4543xxxxxxxx6152" or "4543 xxxx xxxx 6152"
+CARD_RE = re.compile(r'\d{4}[xX*\s]+(\d{4})')
+
+
+def _extract_card_last4(original_filename: str) -> str:
+    """Extract last 4 digits of card number from attachment filename."""
+    m = CARD_RE.search(original_filename)
+    return m.group(1) if m else 'unknown'
+
+
+def _build_filename(bank_id: str, date_str: str, message_id: str, card_last4: str) -> str:
+    """Build structured filename: bank(...),date(...),emailid(...),card(...).pdf"""
+    return f"bank({bank_id}),date({date_str}),emailid({message_id}),card({card_last4}).pdf"
 
 
 def main():
@@ -63,11 +81,12 @@ def main():
 
             parts = full_msg['payload'].get('parts', [])
             for part in parts:
-                filename = part.get('filename', '')
-                if filename and filename.lower().endswith('.pdf'):
+                original_filename = part.get('filename', '')
+                if original_filename and original_filename.lower().endswith('.pdf'):
                     att_id = part['body'].get('attachmentId')
                     if att_id:
-                        safe_filename = f"{bank_id}_{date_str}_{i+1:03d}_{filename}"
+                        card_last4 = _extract_card_last4(original_filename)
+                        safe_filename = _build_filename(bank_id, date_str, message_id, card_last4)
                         dest = os.path.join(SAVE_DIR, safe_filename)
                         if os.path.exists(dest):
                             logger.info(f"  Already downloaded: {safe_filename}")
@@ -81,3 +100,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

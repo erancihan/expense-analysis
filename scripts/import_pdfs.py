@@ -41,6 +41,7 @@ def main():
         print(f"\n{'='*50}")
         print(f"Import Summary:")
         print(f"  Files found:         {stats['files_found']}")
+        print(f"  Files skipped:       {stats['files_skipped']}")
         print(f"  Files parsed:        {stats['files_parsed']}")
         print(f"  Transactions parsed: {stats['transactions_parsed']}")
         print(f"  New inserted:        {stats['new_inserted']}")

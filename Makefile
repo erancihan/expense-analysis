@@ -3,7 +3,7 @@ PYTHON := $(VENV)/bin/python
 PIP := $(VENV)/bin/pip
 ALEMBIC := $(VENV)/bin/alembic
 
-.PHONY: install web process import-pdfs retag seed migrations clean
+.PHONY: install web process import-pdfs retag seed backup-tags refresh-db migrations clean
 
 ## Create virtual environment (only if it doesn't exist)
 $(VENV):
@@ -45,6 +45,28 @@ migrations-status: install
 ## Seed default tags and rules from data/seeds/tags.yaml
 seed: install
 	$(PYTHON) scripts/seed.py
+
+## Backup tags and rules from DB to data/seeds/tags.yaml
+backup-tags: install
+	$(PYTHON) scripts/backup_tags.py
+
+## Full DB refresh: backup tags → reset DB → migrate → seed → download → import → retag
+refresh-db: install
+	@echo "══════ Backing up tags ══════"
+	$(PYTHON) scripts/backup_tags.py
+	@echo "══════ Removing database ══════"
+	rm -f data/expenses.db data/expenses.db-shm data/expenses.db-wal
+	@echo "══════ Running migrations ══════"
+	$(ALEMBIC) upgrade head
+	@echo "══════ Seeding tags ══════"
+	$(PYTHON) scripts/seed.py
+	@echo "══════ Downloading PDFs ══════"
+	$(PYTHON) scripts/download_pdfs.py
+	@echo "══════ Importing PDFs ══════"
+	$(PYTHON) scripts/import_pdfs.py
+	@echo "══════ Re-tagging ══════"
+	$(PYTHON) scripts/retag.py
+	@echo "══════ Done ══════"
 
 ## ── Import & Tagging ────────────────────────────────────────────
 

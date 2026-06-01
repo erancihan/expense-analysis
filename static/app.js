@@ -358,18 +358,45 @@ function app() {
             this.editTagModalOpen = true;
         },
 
+        openCreateTag() {
+            this.editTagForm = {
+                id: '',
+                name: '',
+                color: '#6366f1',
+                icon: '🏷️',
+                merge_target_id: ''
+            };
+            this.editTagModalOpen = true;
+        },
+
         async submitEditTag() {
-            if (!this.editTagForm.name || !this.editTagForm.id) return;
+            if (!this.editTagForm.name) return;
             this.loading = true;
-            await fetch(`/api/tags/${this.editTagForm.id}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    name: this.editTagForm.name,
-                    color: this.editTagForm.color,
-                    icon: this.editTagForm.icon,
-                }),
-            });
+
+            if (this.editTagForm.id) {
+                // Update existing tag
+                await fetch(`/api/tags/${this.editTagForm.id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: this.editTagForm.name,
+                        color: this.editTagForm.color,
+                        icon: this.editTagForm.icon,
+                    }),
+                });
+            } else {
+                // Create new tag
+                await fetch('/api/tags', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: this.editTagForm.name,
+                        color: this.editTagForm.color,
+                        icon: this.editTagForm.icon,
+                    }),
+                });
+            }
+
             this.editTagModalOpen = false;
             await this.fetchTags();
             await Promise.all([this.fetchExpenses(), this.fetchSummary()]);

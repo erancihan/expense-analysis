@@ -117,3 +117,4 @@ class ProcessedEmail(Base):
 
     def __repr__(self):
         return f"<ProcessedEmail(message_id='{self.message_id}', status='{self.status}')>"
+
