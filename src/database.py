@@ -1,11 +1,10 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from src.models import Base
-import os
-
-# Default to a local SQLite file in the data directory
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'expenses.db')
-DATABASE_URL = os.getenv('DATABASE_URL', f'sqlite:///{DB_PATH}')
+# Single source of truth for the DB URL: src.config resolves env vars AND the
+# optional config.local.yaml override. Re-exported here so alembic/env.py (which
+# imports DATABASE_URL from this module) stays consistent with the app.
+from src.config import DATABASE_URL
 
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False} if 'sqlite' in DATABASE_URL else {})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

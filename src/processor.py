@@ -4,8 +4,10 @@ import os
 from sqlalchemy.orm import Session
 from src.gmail_client import GmailClient
 from src.database import get_db
-from src.models import Expense, ProcessedEmail
+from src.models import ProcessedEmail
 from src.config import BANK_CONFIG
+from src.ingest import ingest_transactions, load_fingerprints
+from src.tag_engine import TagEngine
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
@@ -73,7 +75,7 @@ class ExpenseProcessor:
                     continue
 
             try:
-                self._process_message(bank_id, message_id, db)
+                new_expenses = self._process_message(bank_id, message_id, db)
                 # Mark as success
                 if not existing:
                     processed = ProcessedEmail(message_id=message_id, status='SUCCESS')
@@ -82,6 +84,10 @@ class ExpenseProcessor:
                     existing.status = 'SUCCESS'
                     existing.processed_at = datetime.now(timezone.utc).replace(tzinfo=None)
                 db.commit()
+
+                # Auto-tag the newly-inserted expenses (now that they have ids).
+                if new_expenses:
+                    TagEngine(db).apply_rules(new_expenses)
             except Exception as e:
                 logger.error(f"Failed to process message {message_id}: {e}")
                 db.rollback()
@@ -109,9 +115,14 @@ class ExpenseProcessor:
         logger.info(f"  Date:    {headers.get('Date', '(unknown)')}")
 
     def _process_message(self, bank_id, message_id, db: Session):
+        """Parse a message's PDF attachments and ingest their transactions.
+
+        Returns the list of newly-inserted (uncommitted) Expense objects so the
+        caller can auto-tag them after committing.
+        """
         full_msg, headers = self._get_message_headers(message_id)
         if not full_msg:
-            return
+            return []
 
         # Log email metadata (in non-manual mode, this is the first time we see it)
         if not self.manual:
@@ -122,7 +133,12 @@ class ExpenseProcessor:
         parser = self.parsers.get(bank_id)
         if not parser:
             logger.error(f"No parser found for {bank_id}")
-            return
+            return []
+
+        # Dedup across this message's attachments (and against existing rows)
+        # via a shared fingerprint set, so the same expense isn't inserted twice.
+        fingerprints = load_fingerprints(db)
+        new_expenses = []
 
         for part in full_msg['payload'].get('parts', []):
             if part['filename'] and part['filename'].endswith('.pdf'):
@@ -133,19 +149,18 @@ class ExpenseProcessor:
                     if path:
                         logger.info(f"Parsing {path} with {bank_id} parser")
                         transactions = parser.extract_transactions(path)
-                        
-                        for tx in transactions:
-                            expense = Expense(
-                                date=tx['date'],
-                                description=tx['description'].strip(),
-                                amount=tx['amount'],
-                                currency=tx.get('currency', 'TRY'),
-                                category=tx.get('category'),
-                                bank_source=bank_id,
-                                card_number=tx.get('card_number', ''),
-                                raw_text=tx.get('raw_text')
-                            )
-                            db.add(expense)
-                        
+
+                        # Shared ingestion: dedup + statement_period stamping,
+                        # identical to the batch importer's behaviour.
+                        new, _ = ingest_transactions(
+                            db,
+                            transactions,
+                            bank_source=bank_id,
+                            fingerprints=fingerprints,
+                        )
+                        new_expenses.extend(new)
+
                         # Cleanup
                         os.remove(path)
+
+        return new_expenses

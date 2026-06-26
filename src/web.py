@@ -135,11 +135,6 @@ def api_expenses(db: Session):
             ]
             query = query.filter(Expense.id.in_(expense_ids)) if expense_ids else query.filter(False)
 
-    # Card filter
-    card_filter = request.args.get('card')
-    if card_filter:
-        query = query.filter(Expense.card_number == card_filter)
-
     # Search
     search = request.args.get('search')
     if search and len(search) <= 200:

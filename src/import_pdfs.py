@@ -17,11 +17,11 @@ import glob
 import logging
 import os
 import re
-from datetime import datetime
 from sqlalchemy.orm import Session
 from src.models import Expense, ProcessedEmail
 from src.parsers.isbank import IsbankParser
 from src.tag_engine import TagEngine
+from src.ingest import ingest_transactions, load_fingerprints
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +108,9 @@ def import_pdfs(db: Session, clear: bool = False, dry_run: bool = False) -> dict
         db.commit()
         logger.info(f"Cleared {deleted} existing expenses, their tags, and processed email records")
 
-    # Load already-processed message IDs
+    # Load message IDs imported in PRIOR runs (SUCCESS only). Used solely to
+    # skip re-parsing PDFs we've already imported — it is NOT updated mid-loop,
+    # so sibling PDFs from the same email (different cards) are still processed.
     already_processed = set()
     if not clear:
         for row in db.query(ProcessedEmail.message_id).filter_by(status='SUCCESS').all():
@@ -117,23 +119,26 @@ def import_pdfs(db: Session, clear: bool = False, dry_run: bool = False) -> dict
             logger.info(f"Found {len(already_processed)} already-processed message IDs")
 
     # Build a set of existing expense fingerprints for dedup
-    existing_fingerprints = set()
-    if not clear:
-        for exp in db.query(Expense.date, Expense.description, Expense.amount, Expense.card_number).all():
-            fp = _fingerprint(exp.date, exp.description, exp.amount, exp.card_number)
-            existing_fingerprints.add(fp)
+    existing_fingerprints = set() if clear else load_fingerprints(db)
+    if existing_fingerprints:
         logger.info(f"Loaded {len(existing_fingerprints)} existing expense fingerprints")
 
     # Parse each PDF
     parser = IsbankParser()
     new_expenses = []
+    # Per-email outcome for THIS run. Written to processed_emails once, after the
+    # loop, so a single email's multiple card PDFs don't fight over its status
+    # and SUCCESS always wins over FAILED.
+    email_outcomes: dict = {}
 
     for pdf_path in pdf_files:
         basename = os.path.basename(pdf_path)
         fields = parse_pdf_filename(basename)
         email_id = fields.get('emailid')
 
-        # Skip if already processed successfully
+        # Skip only if a PRIOR run already imported this email's statements.
+        # The fingerprint dedup below is the real correctness guarantee; this is
+        # just an optimisation to avoid re-parsing PDFs.
         if email_id and email_id in already_processed:
             logger.debug(f"Skipping {basename} — message {email_id} already processed")
             stats['files_skipped'] += 1
@@ -150,56 +155,40 @@ def import_pdfs(db: Session, clear: bool = False, dry_run: bool = False) -> dict
             stats['files_parsed'] += 1
             stats['transactions_parsed'] += len(transactions)
 
-            for tx in transactions:
-                # Skip entries with no TUTAR amount (non-monetary lines
-                # like MaxiPuan point operations)
-                if tx['amount'] is None:
-                    continue
+            new, ing = ingest_transactions(
+                db,
+                transactions,
+                bank_source=fields.get('bank', 'isbank'),
+                fallback_period=filename_period,
+                fingerprints=existing_fingerprints,
+                dry_run=dry_run,
+            )
+            new_expenses.extend(new)
+            stats['new_inserted'] += ing['inserted']
+            stats['duplicates_skipped'] += ing['duplicates']
 
-                fp = _fingerprint(tx['date'], tx['description'], tx['amount'], tx.get('card_number', ''))
-
-                if fp in existing_fingerprints:
-                    stats['duplicates_skipped'] += 1
-                    continue
-
-                # Prefer statement_period from Hesap Kesim Tarihi in the PDF,
-                # fall back to filename-derived period
-                period = tx.get('statement_period') or filename_period
-
-                if not dry_run:
-                    expense = Expense(
-                        date=tx['date'],
-                        description=tx['description'].strip(),
-                        amount=tx['amount'],
-                        currency=tx.get('currency', 'TRY'),
-                        category=tx.get('category'),
-                        bank_source=fields.get('bank', 'isbank'),
-                        card_number=tx.get('card_number', ''),
-                        statement_period=period,
-                        raw_text=tx.get('raw_text'),
-                    )
-                    db.add(expense)
-                    new_expenses.append(expense)
-
-                existing_fingerprints.add(fp)
-                stats['new_inserted'] += 1
-
-            # Mark this email as processed
-            if not dry_run and email_id:
-                record = ProcessedEmail(message_id=email_id, status='SUCCESS')
-                db.add(record)
-                already_processed.add(email_id)
+            if email_id:
+                email_outcomes[email_id] = 'SUCCESS'
 
         except Exception as e:
             logger.error(f"Error parsing {basename}: {e}")
             stats['errors'] += 1
 
-            # Record the failure so we can see it, but it will be retried next run
-            if not dry_run and email_id and email_id not in already_processed:
-                record = ProcessedEmail(message_id=email_id, status='FAILED')
-                db.add(record)
+            # Record the failure so it's visible; it is retried next run. A
+            # SUCCESS from a sibling PDF of the same email takes precedence.
+            if email_id and email_outcomes.get(email_id) != 'SUCCESS':
+                email_outcomes[email_id] = 'FAILED'
 
     if not dry_run:
+        # Upsert one processed_emails row per email (avoids duplicate-key errors
+        # when retrying a previously-FAILED email, and dedups multi-card emails).
+        for eid, status in email_outcomes.items():
+            record = db.query(ProcessedEmail).filter_by(message_id=eid).first()
+            if record:
+                record.status = status
+            else:
+                db.add(ProcessedEmail(message_id=eid, status=status))
+
         db.commit()
         if new_expenses:
             logger.info(f"Inserted {stats['new_inserted']} new expenses")
@@ -210,9 +199,3 @@ def import_pdfs(db: Session, clear: bool = False, dry_run: bool = False) -> dict
             logger.info(f"Applied {stats['tags_applied']} tags to new expenses")
 
     return stats
-
-
-def _fingerprint(date: datetime, description: str, amount: float, card_number: str) -> str:
-    """Create a unique fingerprint for deduplication."""
-    date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else str(date)
-    return f"{date_str}|{description}|{amount:.2f}|{card_number}"
