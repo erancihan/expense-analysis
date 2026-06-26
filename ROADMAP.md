@@ -16,8 +16,8 @@ each user has isolated expenses and connects their own Gmail.
 ## Status
 
 - [x] **Phase 1 — Stabilize the WIP** *(done 2026-06-26)*
-- [ ] **Phase 0 — Hygiene** *(in progress)*
-- [ ] **Phase 2 — Full multi-user + security** *(next; the namesake feature)*
+- [x] **Phase 0 — Hygiene** *(done 2026-06-26)*
+- [~] **Phase 2 — Full multi-user + security** *(in progress: auth gate landed; data isolation next)*
 - [ ] **Phase 3 — Tests & CI**
 - [ ] **Phase 4 — Features**
 
@@ -58,14 +58,30 @@ each user has isolated expenses and connects their own Gmail.
 
 The largest phase. Internet-facing, so security is in scope from the start.
 
-**2a. Auth & data model**
-- [ ] `User` model (email, `password_hash` via werkzeug/bcrypt, `is_active`, timestamps).
-- [ ] Flask-Login; `login` / `register` / `logout` routes + pages.
+**Decisions taken** (2026-06-26): password accounts · per-user default tags (seeded on
+signup) · invite/admin-only registration.
+
+**2a-i. Auth gate** ✅ *(done 2026-06-26)*
+- [x] `User` model (email, `password_hash` via werkzeug, `is_admin`, `is_active`, timestamps)
+      + `users` migration.
+- [x] Flask-Login; `login` / `logout` routes + login page + header logout button.
+- [x] Fail-closed gate: `before_request` requires auth for every endpoint except an
+      explicit allowlist (`auth.login`, `static`); 401 for `/api/*`, redirect for pages.
+- [x] Admin-only account creation (`scripts/create_user.py`, `make create-user`); no public
+      sign-up. Open-redirect guard on `?next=`.
+- [x] `SECRET_KEY` + `HttpOnly`/`SameSite=Lax`/`Secure` session cookies from config.
+- [x] Tests: `test_auth.py` (gate, login/logout, inactive user, bad password, open-redirect).
+
+**2a-ii. Data isolation** *(next)*
 - [ ] Add `user_id` FK to `Expense`, `Tag`, `TagRule`, `ProcessedEmail`. Alembic
-      data-migration: create table → add nullable columns → seed a default user →
-      backfill existing rows → set non-null.
-- [ ] `@login_required` on every route; **scope every query by `current_user.id`**
+      data-migration: add nullable columns → backfill existing rows to the first admin →
+      set non-null (batch mode for SQLite).
+- [ ] **Scope every query by `current_user.id`** across all `web.py` endpoints
       (the bulk of the work and the main correctness risk).
+- [ ] Thread `user_id` through ingestion (`ingest.py`, `import_pdfs.py`, `processor.py`,
+      CLI scripts) — imports attribute to the owning user.
+- [ ] Seed per-user default tags on account creation. Isolation tests (user A can't see
+      user B's data).
 
 **2b. Security hardening**
 - [ ] CSRF tokens on all mutating endpoints (none today).
@@ -78,12 +94,10 @@ The largest phase. Internet-facing, so security is in scope from the start.
 - [ ] Per-user OAuth connect + per-user token storage (today `GmailClient` uses global
       `secrets/*.json`); processor/download iterate users. Can ship after 2a/2b.
 
-### Open decisions for Phase 2
-- **Default tags: global vs per-user?** Recommendation: **per-user, seeded on signup**
-  (cleanest isolation; every tag has an owner; simpler merge/delete/retag). Alternative:
-  global read-only defaults + per-user custom (less duplication, messier ownership).
-- **Registration model:** open sign-up vs invite-only/admin-created (self-hosted personal
-  app likely wants invite-only or a fixed admin).
+### Decisions (resolved 2026-06-26)
+- **Auth:** password accounts (werkzeug hashing + Flask-Login sessions).
+- **Default tags:** per-user, seeded on signup → `Tag`/`TagRule` get a `user_id` in 2a-ii.
+- **Registration:** invite/admin-only; initial admin via `scripts/create_user.py`.
 
 ## Phase 3 — Tests & CI
 

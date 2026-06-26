@@ -5,10 +5,28 @@ from sqlalchemy import (
 from sqlalchemy.orm import declarative_base, relationship
 from datetime import datetime, timezone
 
+from flask_login import UserMixin
+
 def utc_now():
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 Base = declarative_base()
+
+
+class User(Base, UserMixin):
+    __tablename__ = 'users'
+
+    id = Column(Integer, primary_key=True)
+    email = Column(String, unique=True, nullable=False)
+    password_hash = Column(String, nullable=False)
+    is_admin = Column(Boolean, default=False)
+    # NOTE: shadows UserMixin.is_active (a property) with a real column so
+    # Flask-Login reads the stored flag. Disabled users can't authenticate.
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=utc_now)
+
+    def __repr__(self):
+        return f"<User(email='{self.email}')>"
 
 
 class Expense(Base):

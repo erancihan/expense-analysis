@@ -10,13 +10,16 @@ import os
 from datetime import datetime, timedelta
 from functools import wraps
 
-from flask import Flask, jsonify, request, send_from_directory, render_template, Response
+from flask import Flask, jsonify, request, send_from_directory, render_template, redirect, url_for, Response
+from flask_login import LoginManager, current_user
 from sqlalchemy import func, extract
 from sqlalchemy.orm import Session
 
+from src.config import SECRET_KEY, SESSION_COOKIE_SECURE
 from src.database import SessionLocal
-from src.models import Expense, Tag, TagRule, ExpenseTag
+from src.models import Expense, Tag, TagRule, ExpenseTag, User
 from src.tag_engine import TagEngine
+from src.auth import auth_bp
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +30,52 @@ TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__fi
 
 app = Flask(__name__, static_folder=STATIC_DIR, template_folder=TEMPLATE_DIR)
 app.json.ensure_ascii = False
+
+# ── Auth / sessions ──────────────────────────────────────────────────────────
+
+app.secret_key = SECRET_KEY
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+    SESSION_COOKIE_SECURE=SESSION_COOKIE_SECURE,
+)
+
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'auth.login'
+
+
+@login_manager.user_loader
+def load_user(user_id: str):
+    db = SessionLocal()
+    try:
+        return db.get(User, int(user_id))
+    finally:
+        db.close()
+
+
+@login_manager.unauthorized_handler
+def unauthorized():
+    # JSON for the API, a redirect-to-login for page requests.
+    if request.path.startswith('/api/'):
+        return jsonify({'error': 'Authentication required'}), 401
+    return redirect(url_for('auth.login', next=request.path))
+
+
+app.register_blueprint(auth_bp)
+
+# Allowlisted endpoints reachable without a session. Everything else is denied
+# by default (fail-closed), so new routes are protected unless added here.
+_PUBLIC_ENDPOINTS = {'auth.login', 'static'}
+
+
+@app.before_request
+def require_login():
+    if request.endpoint in _PUBLIC_ENDPOINTS:
+        return None
+    if not current_user.is_authenticated:
+        return login_manager.unauthorized()
+    return None
 
 
 # ── Security headers ────────────────────────────────────────────────────────

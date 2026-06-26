@@ -21,6 +21,14 @@ GMAIL_TOKEN_PATH = os.getenv('GMAIL_TOKEN_PATH', 'secrets/token.json')
 # Application
 CHECK_INTERVAL_MINUTES = int(os.getenv('CHECK_INTERVAL_MINUTES', 60))
 
+# Web / auth
+_DEV_SECRET = 'dev-insecure-secret-change-me'
+SECRET_KEY = os.getenv('SECRET_KEY', _DEV_SECRET)
+# Set true behind HTTPS so the session cookie is only sent over TLS.
+SESSION_COOKIE_SECURE = os.getenv('SESSION_COOKIE_SECURE', 'false').lower() in ('1', 'true', 'yes', 'on')
+# No public sign-up by default — users are created by an admin (scripts/create_user.py).
+ALLOW_REGISTRATION = os.getenv('ALLOW_REGISTRATION', 'false').lower() in ('1', 'true', 'yes', 'on')
+
 # Bank Configuration
 BANK_CONFIG = {
     'isbank': {
@@ -41,6 +49,7 @@ LOCAL_CONFIG_PATH = os.path.join(
 def _load_local_config():
     global DATABASE_URL, GMAIL_CREDENTIALS_PATH, GMAIL_TOKEN_PATH
     global CHECK_INTERVAL_MINUTES, BANK_CONFIG
+    global SECRET_KEY, SESSION_COOKIE_SECURE, ALLOW_REGISTRATION
 
     if not os.path.exists(LOCAL_CONFIG_PATH):
         return
@@ -59,5 +68,17 @@ def _load_local_config():
         CHECK_INTERVAL_MINUTES = int(local['check_interval_minutes'])
     if 'bank_config' in local:
         BANK_CONFIG = local['bank_config']
+    if 'secret_key' in local:
+        SECRET_KEY = local['secret_key']
+    if 'session_cookie_secure' in local:
+        SESSION_COOKIE_SECURE = bool(local['session_cookie_secure'])
+    if 'allow_registration' in local:
+        ALLOW_REGISTRATION = bool(local['allow_registration'])
 
 _load_local_config()
+
+if SECRET_KEY == _DEV_SECRET:
+    logger.warning(
+        "SECRET_KEY is the insecure development default. Set SECRET_KEY (env or "
+        "config.local.yaml) before deploying — sessions are forgeable otherwise."
+    )

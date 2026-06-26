@@ -3,7 +3,7 @@ PYTHON := $(VENV)/bin/python
 PIP := $(VENV)/bin/pip
 ALEMBIC := $(VENV)/bin/alembic
 
-.PHONY: install web process import-pdfs retag seed backup-tags refresh-db migrations clean
+.PHONY: install web process import-pdfs retag seed backup-tags refresh-db migrations create-user clean
 
 ## Create virtual environment (only if it doesn't exist)
 $(VENV):
@@ -109,6 +109,11 @@ add-tag: install
 		$$([ -n "$(COLOR)" ] && echo "--color $(COLOR)") \
 		$$([ -n "$(ICON)" ] && echo "--icon $(ICON)") \
 		$$RULE_ARGS
+
+## Create (or reset) a user account (usage: make create-user EMAIL=you@example.com [ADMIN=1])
+create-user: install
+	@if [ -z "$(EMAIL)" ]; then echo "Usage: make create-user EMAIL=you@example.com [ADMIN=1]"; exit 1; fi
+	$(PYTHON) scripts/create_user.py $(EMAIL) $$([ -n "$(ADMIN)" ] && echo "--admin")
 
 ## ── Testing ─────────────────────────────────────────────────────
 

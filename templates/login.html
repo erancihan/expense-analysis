@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign in · Expense Analysis</title>
+    <!-- TODO(security): pin CDN + add SRI; add CSRF token to this form in Phase 2b -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = { darkMode: 'class', theme: { extend: { fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] } } } }
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body class="bg-slate-950 text-slate-200 font-sans min-h-screen flex items-center justify-center px-4">
+    <div class="w-full max-w-sm">
+        <div class="text-center mb-8">
+            <h1 class="text-3xl font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
+                Expense Analysis
+            </h1>
+            <p class="text-slate-500 text-sm mt-2">Sign in to continue</p>
+        </div>
+
+        <form method="POST"
+              action="{{ url_for('auth.login', next=next) if next else url_for('auth.login') }}"
+              class="bg-slate-900/70 border border-slate-800 rounded-2xl p-6 space-y-4 shadow-xl">
+            {% if error %}
+            <div class="bg-red-500/10 border border-red-500/30 text-red-300 text-sm rounded-lg px-3 py-2">
+                {{ error }}
+            </div>
+            {% endif %}
+
+            <div>
+                <label class="block text-xs uppercase tracking-wider text-slate-400 mb-1.5" for="email">Email</label>
+                <input id="email" name="email" type="email" required autofocus autocomplete="username"
+                       class="w-full bg-slate-800/60 border border-slate-700 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none">
+            </div>
+
+            <div>
+                <label class="block text-xs uppercase tracking-wider text-slate-400 mb-1.5" for="password">Password</label>
+                <input id="password" name="password" type="password" required autocomplete="current-password"
+                       class="w-full bg-slate-800/60 border border-slate-700 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none">
+            </div>
+
+            <button type="submit"
+                    class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-medium py-2.5 rounded-lg transition-colors">
+                Sign in
+            </button>
+        </form>
+
+        <p class="text-center text-slate-600 text-xs mt-6">Accounts are created by an administrator.</p>
+    </div>
+</body>
+</html>

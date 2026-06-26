@@ -10,3 +10,4 @@ schedule
 python-dotenv
 pyyaml
 flask
+flask-login

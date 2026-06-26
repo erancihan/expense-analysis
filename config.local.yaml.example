@@ -6,6 +6,15 @@
 # gmail_token_path: "secrets/token.json"
 # check_interval_minutes: 30
 
+# ── Web / auth ───────────────────────────────────────────────────
+# REQUIRED in production: a long random string used to sign session cookies.
+#   python -c "import secrets; print(secrets.token_hex(32))"
+# secret_key: "change-me-to-a-long-random-value"
+# Set true when serving over HTTPS so the session cookie is TLS-only.
+# session_cookie_secure: true
+# Public self-sign-up is OFF by default; create users with scripts/create_user.py.
+# allow_registration: false
+
 # bank_config:
 #   isbank:
 #     senders:

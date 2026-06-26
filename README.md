@@ -88,11 +88,27 @@ make download-pdfs
 # 6. Import PDFs into the database
 make import-pdfs
 
-# 7. Start the web UI
+# 7. Create your account (the dashboard requires login)
+make create-user EMAIL=you@example.com ADMIN=1
+
+# 8. Start the web UI
 make web
 ```
 
-The web dashboard will be available at `http://127.0.0.1:5000`.
+The web dashboard will be available at `http://127.0.0.1:5000` and will prompt
+you to sign in.
+
+### Authentication
+
+The dashboard and all `/api/*` routes require a logged-in session (Flask-Login).
+There is no public sign-up — an admin provisions accounts:
+
+```bash
+make create-user EMAIL=you@example.com ADMIN=1     # prompts for a password
+```
+
+Before deploying, set a strong `secret_key` (and `session_cookie_secure: true`
+behind HTTPS) in `config.local.yaml` — see `config.local.yaml.example`.
 
 ### Returning Use
 
