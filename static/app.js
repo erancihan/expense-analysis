@@ -59,6 +59,10 @@ function app() {
         tagRules: [],
         cards: [],
 
+        // Budgets
+        budgets: [],
+        newBudget: { tag_id: '', amount: '' },
+
         // Add rule form
         newRule: { pattern: '', tag_id: '', match_type: 'contains' },
 
@@ -140,6 +144,7 @@ function app() {
                 this.fetchTags(),
                 this.fetchCards(),
                 this.fetchGmailStatus(),
+                this.fetchBudgets(),
             ]);
             await Promise.all([
                 this.fetchSummary(),
@@ -163,6 +168,52 @@ function app() {
             if (!confirm('Disconnect Gmail? Statements will no longer import automatically.')) return;
             await fetch('/gmail/disconnect', { method: 'POST' });
             await this.fetchGmailStatus();
+        },
+
+        // ── Budgets ───────────────────────────────────────────────
+        async fetchBudgets() {
+            try {
+                const res = await fetch('/api/budgets');
+                this.budgets = await res.json();
+            } catch (e) {
+                this.budgets = [];
+            }
+        },
+
+        async saveBudget() {
+            if (!this.newBudget.amount || this.newBudget.amount <= 0) return;
+            const tag_id = this.newBudget.tag_id === '' ? null : parseInt(this.newBudget.tag_id);
+            await fetch('/api/budgets', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tag_id, amount: this.newBudget.amount }),
+            });
+            this.newBudget = { tag_id: '', amount: '' };
+            await this.fetchBudgets();
+        },
+
+        async deleteBudget(id) {
+            await fetch('/api/budgets/' + id, { method: 'DELETE' });
+            await this.fetchBudgets();
+        },
+
+        // Budget progress for the currently-selected statement period.
+        get budgetProgress() {
+            const period = this.selectedPeriodData;
+            return this.budgets.map(b => {
+                let spent, label;
+                if (b.tag_id === null) {
+                    label = 'Overall';
+                    spent = period ? period.total : 0;
+                } else {
+                    const tag = this.tags.find(t => t.id === b.tag_id);
+                    label = tag ? (tag.icon + ' ' + tag.name) : (b.tag_name || 'tag');
+                    spent = (period && period.by_tag && period.by_tag[b.tag_name])
+                        ? period.by_tag[b.tag_name].total : 0;
+                }
+                const pct = b.amount > 0 ? (spent / b.amount * 100) : 0;
+                return { id: b.id, label, spent, limit: b.amount, pct, over: spent > b.amount };
+            });
         },
 
         // ── API calls ─────────────────────────────────────────────

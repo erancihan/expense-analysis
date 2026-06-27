@@ -141,6 +141,30 @@ class ExpenseTag(Base):
         return f"<ExpenseTag(expense_id={self.expense_id}, tag_id={self.tag_id}, source='{self.source}')>"
 
 
+class Budget(Base):
+    __tablename__ = 'budgets'
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
+    tag_id = Column(Integer, ForeignKey('tags.id'), nullable=True)  # NULL = overall
+    amount = Column(Float, nullable=False)                          # monthly limit (TRY)
+    created_at = Column(DateTime, default=utc_now)
+
+    tag = relationship('Tag')
+
+    __table_args__ = (
+        UniqueConstraint('user_id', 'tag_id', name='uq_budget_user_tag'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'tag_id': self.tag_id,
+            'tag_name': self.tag.name if self.tag else None,
+            'amount': self.amount,
+        }
+
+
 class ProcessedEmail(Base):
     __tablename__ = 'processed_emails'
 

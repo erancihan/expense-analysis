@@ -19,7 +19,7 @@ from datetime import datetime
 
 from werkzeug.security import generate_password_hash
 
-from src.models import Base, User, Expense, Tag
+from src.models import Base, User, Expense, Tag, Budget
 from src.database import engine, SessionLocal
 from src.extensions import limiter
 from src.web import app
@@ -268,6 +268,65 @@ class SecurityHardeningTestCase(unittest.TestCase):
         self.assertEqual(r.headers.get('X-Content-Type-Options'), 'nosniff')
         self.assertEqual(r.headers.get('X-Frame-Options'), 'DENY')
         self.assertIn('Content-Security-Policy', r.headers)
+
+
+class BudgetTestCase(unittest.TestCase):
+    """Budget CRUD, upsert, validation and per-user scoping."""
+
+    @classmethod
+    def setUpClass(cls):
+        Base.metadata.create_all(engine)
+
+    def setUp(self):
+        db = SessionLocal()
+        try:
+            for m in (Budget, Tag, Expense, User):
+                db.query(m).delete()
+            db.commit()
+            a = User(email='a@x', password_hash=generate_password_hash('pw'), is_active=True)
+            b = User(email='b@x', password_hash=generate_password_hash('pw'), is_active=True)
+            db.add_all([a, b]); db.commit()
+            self.a_id, self.b_id = a.id, b.id
+            ta = Tag(user_id=a.id, name='grocery', color='#fff', icon='🛒')
+            tb = Tag(user_id=b.id, name='grocery', color='#fff', icon='🛒')
+            db.add_all([ta, tb]); db.commit()
+            self.tag_a_id, self.tag_b_id = ta.id, tb.id
+        finally:
+            db.close()
+        self.client = app.test_client()
+        self.client.post('/login', data={'email': 'a@x', 'password': 'pw'})
+
+    def test_create_and_list_overall_first(self):
+        self.client.post('/api/budgets', json={'tag_id': None, 'amount': 5000})
+        self.client.post('/api/budgets', json={'tag_id': self.tag_a_id, 'amount': 1200})
+        items = self.client.get('/api/budgets').get_json()
+        self.assertEqual(len(items), 2)
+        self.assertIsNone(items[0]['tag_id'])  # overall first
+
+    def test_upsert_updates_not_duplicates(self):
+        self.client.post('/api/budgets', json={'tag_id': self.tag_a_id, 'amount': 1000})
+        self.client.post('/api/budgets', json={'tag_id': self.tag_a_id, 'amount': 1500})
+        items = self.client.get('/api/budgets').get_json()
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]['amount'], 1500)
+
+    def test_rejects_non_positive_amount(self):
+        self.assertEqual(self.client.post('/api/budgets', json={'tag_id': None, 'amount': 0}).status_code, 400)
+        self.assertEqual(self.client.post('/api/budgets', json={'tag_id': None, 'amount': 'x'}).status_code, 400)
+
+    def test_cannot_budget_other_users_tag(self):
+        r = self.client.post('/api/budgets', json={'tag_id': self.tag_b_id, 'amount': 100})
+        self.assertEqual(r.status_code, 404)
+
+    def test_budgets_are_scoped(self):
+        db = SessionLocal()
+        try:
+            db.add(Budget(user_id=self.b_id, tag_id=self.tag_b_id, amount=999)); db.commit()
+            bid = db.query(Budget).filter_by(user_id=self.b_id).first().id
+        finally:
+            db.close()
+        self.assertEqual(self.client.get('/api/budgets').get_json(), [])
+        self.assertEqual(self.client.delete(f'/api/budgets/{bid}').status_code, 404)
 
 
 class GmailWebTestCase(unittest.TestCase):

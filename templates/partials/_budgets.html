@@ -1,0 +1,48 @@
+<!-- Budgets: per-tag & overall monthly limits with progress for the selected period -->
+<section class="glass-card rounded-2xl p-6 mb-8">
+    <div class="flex items-center justify-between flex-wrap gap-3 mb-4">
+        <h2 class="text-lg font-semibold text-slate-200">Budgets</h2>
+        <!-- Add / update a budget -->
+        <div class="flex items-center gap-2 flex-wrap">
+            <select x-model="newBudget.tag_id"
+                    class="bg-slate-800/60 border border-slate-700 rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500">
+                <option value="">Overall</option>
+                <template x-for="tag in tags" :key="tag.id">
+                    <option :value="tag.id" x-text="tag.icon + ' ' + tag.name"></option>
+                </template>
+            </select>
+            <input type="number" min="1" x-model.number="newBudget.amount" placeholder="Monthly limit ₺"
+                   @keydown.enter="saveBudget()"
+                   class="w-36 bg-slate-800/60 border border-slate-700 rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500 placeholder-slate-500">
+            <button @click="saveBudget()"
+                    class="btn-press bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-1.5 rounded-lg text-sm font-medium transition-colors">
+                Set
+            </button>
+        </div>
+    </div>
+
+    <div x-show="budgets.length === 0" class="text-sm text-slate-500">
+        No budgets yet — set a monthly limit per tag or an overall cap.
+    </div>
+
+    <div class="space-y-3">
+        <template x-for="b in budgetProgress" :key="b.id">
+            <div>
+                <div class="flex items-center justify-between text-sm mb-1">
+                    <span class="text-slate-300" x-text="b.label"></span>
+                    <div class="flex items-center gap-3">
+                        <span :class="b.over ? 'text-red-400 font-medium' : 'text-slate-400'">
+                            <span x-text="formatCurrency(b.spent)"></span> / <span x-text="formatCurrency(b.limit)"></span>
+                        </span>
+                        <button @click="deleteBudget(b.id)" class="text-slate-600 hover:text-red-400 transition-colors" title="Remove budget">✕</button>
+                    </div>
+                </div>
+                <div class="h-2 rounded-full bg-slate-800 overflow-hidden">
+                    <div class="h-full rounded-full transition-all duration-300"
+                         :class="b.over ? 'bg-red-500' : (b.pct >= 80 ? 'bg-amber-500' : 'bg-emerald-500')"
+                         :style="`width: ${Math.min(100, b.pct)}%`"></div>
+                </div>
+            </div>
+        </template>
+    </div>
+</section>

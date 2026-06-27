@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from src.config import SECRET_KEY, SESSION_COOKIE_SECURE, TRUSTED_PROXIES
 from src.database import SessionLocal
-from src.models import Expense, Tag, TagRule, ExpenseTag, User
+from src.models import Expense, Tag, TagRule, ExpenseTag, User, Budget
 from src.tag_engine import TagEngine
 from src.auth import auth_bp
 from src.extensions import csrf, limiter
@@ -841,6 +841,62 @@ def api_cards(db: Session):
         }
         for c in cards
     ])
+
+
+# ── API: Budgets ─────────────────────────────────────────────────────────────
+
+@app.route('/api/budgets')
+@with_db
+def api_budgets(db: Session):
+    budgets = (
+        db.query(Budget)
+        .filter_by(user_id=current_user.id)
+        .order_by(Budget.tag_id.is_(None).desc())  # overall first
+        .all()
+    )
+    return jsonify([b.to_dict() for b in budgets])
+
+
+@app.route('/api/budgets', methods=['POST'])
+@with_db
+def api_upsert_budget(db: Session):
+    data = request.get_json() or {}
+    tag_id = data.get('tag_id')  # None = overall budget
+    amount = data.get('amount')
+
+    try:
+        amount = float(amount)
+    except (TypeError, ValueError):
+        return jsonify({'error': 'amount must be a number'}), 400
+    if amount <= 0:
+        return jsonify({'error': 'amount must be positive'}), 400
+
+    if tag_id is not None:
+        tag = db.query(Tag).filter_by(id=tag_id, user_id=current_user.id).first()
+        if not tag:
+            return jsonify({'error': 'Tag not found'}), 404
+
+    existing = db.query(Budget).filter_by(user_id=current_user.id, tag_id=tag_id).first()
+    if existing:
+        existing.amount = amount
+        db.commit()
+        return jsonify(existing.to_dict())
+
+    budget = Budget(user_id=current_user.id, tag_id=tag_id, amount=amount)
+    db.add(budget)
+    db.commit()
+    return jsonify(budget.to_dict()), 201
+
+
+@app.route('/api/budgets/<int:budget_id>', methods=['DELETE'])
+@with_db
+def api_delete_budget(db: Session, budget_id: int):
+    budget = db.query(Budget).filter_by(id=budget_id, user_id=current_user.id).first()
+    if not budget:
+        return jsonify({'error': 'Budget not found'}), 404
+    db.delete(budget)
+    db.commit()
+    return jsonify({'ok': True})
 
 
 # ── Gmail connection (per-user OAuth) ─────────────────────────────────────────

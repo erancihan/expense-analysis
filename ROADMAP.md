@@ -138,8 +138,11 @@ signup) · invite/admin-only registration.
 - [x] **CSV export** — `GET /api/expenses/export.csv` (per-user, respects the current
       from/to/card/tag/search filters via the shared `_filtered_user_expenses` helper) +
       an Export button. Formula-injection-safe text fields.
-- [ ] Budgets/alerts, cross-currency totals, additional bank parsers (`BANK_CONFIG`
-      already supports the plug-in shape).
+- [x] **Budgets** — `Budget` model (+ migration) for per-tag and overall monthly limits;
+      CRUD API (`/api/budgets`, per-user scoped, upsert) + a dashboard card showing
+      spent/limit progress for the selected statement period (green/amber/red).
+- [ ] Cross-currency totals, additional bank parsers (`BANK_CONFIG` already supports the
+      plug-in shape).
 - [ ] Strict nonce-based CSP via vendored Tailwind + Alpine CSP build (2b follow-up).
 - [x] **Resolved:** the old `plan.txt` chart-period question — charts already group by
       `statement_period` (the PDF's billing cycle), which is the desired behaviour.
