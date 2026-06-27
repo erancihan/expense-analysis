@@ -19,6 +19,7 @@ class TestExpenseApp(unittest.TestCase):
 
     def test_database_insert(self):
         expense = Expense(
+            user_id=1,
             date=datetime.now(),
             description="Test Expense",
             amount=100.50,

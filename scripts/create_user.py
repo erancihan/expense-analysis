@@ -21,6 +21,7 @@ from werkzeug.security import generate_password_hash
 
 from src.database import SessionLocal
 from src.models import User
+from src.seeding import seed_default_tags
 
 
 def main():
@@ -43,18 +44,22 @@ def main():
             user.password_hash = generate_password_hash(password)
             if args.admin:
                 user.is_admin = True
-            action = 'Updated'
-        else:
-            user = User(
-                email=email,
-                password_hash=generate_password_hash(password),
-                is_admin=args.admin,
-                is_active=True,
-            )
-            db.add(user)
-            action = 'Created'
+            db.commit()
+            print(f"Updated user {email}" + (' (admin)' if args.admin else ''))
+            return
+
+        user = User(
+            email=email,
+            password_hash=generate_password_hash(password),
+            is_admin=args.admin,
+            is_active=True,
+        )
+        db.add(user)
         db.commit()
-        print(f"{action} user {email}" + (' (admin)' if args.admin else ''))
+        # Give the new account its own copy of the default tags + rules.
+        counts = seed_default_tags(db, user.id)
+        print(f"Created user {email}" + (' (admin)' if args.admin else '')
+              + f"; seeded {counts['tags']} tags, {counts['rules']} rules")
     finally:
         db.close()
 

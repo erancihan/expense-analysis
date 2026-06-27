@@ -33,12 +33,12 @@ def fingerprint(date, description: str, amount: float, card_number: str) -> str:
     return f"{date_str}|{description}|{amount:.2f}|{card_number}"
 
 
-def load_fingerprints(db: Session) -> Set[str]:
-    """Load fingerprints for every existing expense (for dedup)."""
+def load_fingerprints(db: Session, user_id: int) -> Set[str]:
+    """Load fingerprints for a user's existing expenses (for dedup)."""
     fingerprints: Set[str] = set()
     for exp in db.query(
         Expense.date, Expense.description, Expense.amount, Expense.card_number
-    ).all():
+    ).filter(Expense.user_id == user_id).all():
         fingerprints.add(fingerprint(exp.date, exp.description, exp.amount, exp.card_number))
     return fingerprints
 
@@ -47,6 +47,7 @@ def ingest_transactions(
     db: Session,
     transactions: Iterable[dict],
     *,
+    user_id: int,
     bank_source: str,
     fallback_period: Optional[str] = None,
     fingerprints: Optional[Set[str]] = None,
@@ -57,11 +58,13 @@ def ingest_transactions(
     Args:
         db: SQLAlchemy session. The caller is responsible for ``commit()``.
         transactions: parsed transaction dicts from a bank parser.
+        user_id: the owning user; set on every inserted expense and used to
+            scope deduplication.
         bank_source: bank id stored on each expense.
         fallback_period: ``YYYY-MM`` used when a transaction carries no
             ``statement_period`` of its own.
-        fingerprints: mutable dedup set. Loaded from the DB when not supplied.
-            Pass the same set across calls to dedup within a batch.
+        fingerprints: mutable dedup set. Loaded from the DB (for this user) when
+            not supplied. Pass the same set across calls to dedup within a batch.
         dry_run: build/count expenses without adding them to the session.
 
     Returns:
@@ -69,7 +72,7 @@ def ingest_transactions(
         ``duplicates`` and ``skipped_no_amount``.
     """
     if fingerprints is None:
-        fingerprints = load_fingerprints(db)
+        fingerprints = load_fingerprints(db, user_id)
 
     new_expenses: List[Expense] = []
     stats = {'inserted': 0, 'duplicates': 0, 'skipped_no_amount': 0}
@@ -92,6 +95,7 @@ def ingest_transactions(
         period = tx.get('statement_period') or fallback_period
 
         expense = Expense(
+            user_id=user_id,
             date=tx['date'],
             description=tx['description'].strip(),
             amount=tx['amount'],

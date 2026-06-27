@@ -22,16 +22,18 @@ class TagEngine:
     the expense description using contains, starts_with, or regex matching.
     """
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, user_id: int):
         self.db = db
+        self.user_id = user_id
         self._rules: Optional[List[TagRule]] = None
 
     @property
     def rules(self) -> List[TagRule]:
-        """Lazily load rules sorted by priority (highest first)."""
+        """Lazily load this user's rules sorted by priority (highest first)."""
         if self._rules is None:
             self._rules = (
                 self.db.query(TagRule)
+                .filter_by(user_id=self.user_id)
                 .order_by(TagRule.priority.desc(), TagRule.id.asc())
                 .all()
             )
@@ -145,47 +147,62 @@ class TagEngine:
 
     def retag_all(self) -> int:
         """
-        Clear all auto-tags and re-apply rules to every expense.
+        Clear this user's auto-tags and re-apply rules to their expenses.
 
         Manual tags are preserved. Returns count of new tags applied.
         """
-        # Delete all auto-assigned tags
-        deleted = (
-            self.db.query(ExpenseTag)
-            .filter(ExpenseTag.source == 'auto')
-            .delete(synchronize_session='fetch')
-        )
+        # This user's expense ids.
+        expense_ids = [
+            e.id for e in self.db.query(Expense.id).filter_by(user_id=self.user_id).all()
+        ]
+
+        # Delete auto-assigned tags on this user's expenses only.
+        deleted = 0
+        if expense_ids:
+            deleted = (
+                self.db.query(ExpenseTag)
+                .filter(ExpenseTag.source == 'auto')
+                .filter(ExpenseTag.expense_id.in_(expense_ids))
+                .delete(synchronize_session='fetch')
+            )
         self.db.commit()
         logger.info(f"Cleared {deleted} auto-tags")
 
-        # Re-apply rules to all expenses
+        # Re-apply rules to this user's expenses.
         self.invalidate_cache()
-        expenses = self.db.query(Expense).all()
+        expenses = self.db.query(Expense).filter_by(user_id=self.user_id).all()
         applied = self.apply_rules(expenses)
         logger.info(f"Applied {applied} auto-tags to {len(expenses)} expenses")
         return applied
 
     def get_stats(self) -> dict:
-        """Return tagging statistics."""
-        total_expenses = self.db.query(Expense).count()
-        tagged = (
-            self.db.query(ExpenseTag.expense_id)
-            .filter(ExpenseTag.source != 'suppressed')
-            .distinct()
-            .count()
-        )
-        untagged = total_expenses - tagged
-
-        # Tags distribution
+        """Return tagging statistics for this user."""
         from sqlalchemy import func
-        tag_counts = (
-            self.db.query(Tag.name, func.count(ExpenseTag.id))
-            .join(ExpenseTag, Tag.id == ExpenseTag.tag_id)
-            .filter(ExpenseTag.source != 'suppressed')
-            .group_by(Tag.name)
-            .order_by(func.count(ExpenseTag.id).desc())
-            .all()
-        )
+
+        expense_ids = [
+            e.id for e in self.db.query(Expense.id).filter_by(user_id=self.user_id).all()
+        ]
+        total_expenses = len(expense_ids)
+        tagged = 0
+        tag_counts = []
+        if expense_ids:
+            tagged = (
+                self.db.query(ExpenseTag.expense_id)
+                .filter(ExpenseTag.expense_id.in_(expense_ids))
+                .filter(ExpenseTag.source != 'suppressed')
+                .distinct()
+                .count()
+            )
+            tag_counts = (
+                self.db.query(Tag.name, func.count(ExpenseTag.id))
+                .join(ExpenseTag, Tag.id == ExpenseTag.tag_id)
+                .filter(ExpenseTag.expense_id.in_(expense_ids))
+                .filter(ExpenseTag.source != 'suppressed')
+                .group_by(Tag.name)
+                .order_by(func.count(ExpenseTag.id).desc())
+                .all()
+            )
+        untagged = total_expenses - tagged
 
         return {
             'total_expenses': total_expenses,

@@ -113,6 +113,13 @@ def with_db(f):
     return wrapper
 
 
+def _owns_expense(db: Session, expense_id: int) -> bool:
+    """True if the expense exists and belongs to the current user."""
+    return db.query(Expense.id).filter_by(
+        id=expense_id, user_id=current_user.id
+    ).first() is not None
+
+
 # ── Static files ─────────────────────────────────────────────────────────────
 
 @app.route('/')
@@ -151,8 +158,12 @@ def api_expenses(db: Session):
     page = max(1, request.args.get('page', 1, type=int))
     per_page = min(200, max(1, request.args.get('per_page', 50, type=int)))
 
-    # Build query
-    query = db.query(Expense).order_by(Expense.date.desc(), Expense.id.desc())
+    # Build query (scoped to the current user)
+    query = (
+        db.query(Expense)
+        .filter(Expense.user_id == current_user.id)
+        .order_by(Expense.date.desc(), Expense.id.desc())
+    )
 
     # Date range filter
     date_from = request.args.get('from')
@@ -173,7 +184,7 @@ def api_expenses(db: Session):
     # Tag filter
     tag_filter = request.args.get('tag')
     if tag_filter:
-        tag = db.query(Tag).filter_by(name=tag_filter).first()
+        tag = db.query(Tag).filter_by(name=tag_filter, user_id=current_user.id).first()
         if tag:
             expense_ids = [
                 et.expense_id for et in
@@ -245,6 +256,7 @@ def api_summary_monthly(db: Session):
     # Base query: exclude payments, include refunds (negative amounts)
     query = (
         db.query(Expense)
+        .filter(Expense.user_id == current_user.id)
         .filter(Expense.category != 'Payment')
         .filter(Expense.statement_period.isnot(None))
     )
@@ -364,7 +376,7 @@ def api_summary_monthly(db: Session):
 @app.route('/api/tags')
 @with_db
 def api_tags(db: Session):
-    tags = db.query(Tag).order_by(Tag.name).all()
+    tags = db.query(Tag).filter_by(user_id=current_user.id).order_by(Tag.name).all()
     return jsonify([t.to_dict() for t in tags])
 
 
@@ -379,7 +391,7 @@ def api_create_tag(db: Session):
     if not name:
         return jsonify({'error': 'name cannot be empty'}), 400
 
-    existing = db.query(Tag).filter_by(name=name).first()
+    existing = db.query(Tag).filter_by(name=name, user_id=current_user.id).first()
     if existing:
         # Update
         if data.get('color'):
@@ -390,6 +402,7 @@ def api_create_tag(db: Session):
         return jsonify(existing.to_dict())
 
     tag = Tag(
+        user_id=current_user.id,
         name=name,
         color=data.get('color', '#6366f1')[:7],
         icon=data.get('icon', '🏷️')[:4],
@@ -403,7 +416,7 @@ def api_create_tag(db: Session):
 @app.route('/api/tags/<int:tag_id>', methods=['DELETE'])
 @with_db
 def api_delete_tag(db: Session, tag_id: int):
-    tag = db.query(Tag).filter_by(id=tag_id).first()
+    tag = db.query(Tag).filter_by(id=tag_id, user_id=current_user.id).first()
     if not tag:
         return jsonify({'error': 'Tag not found'}), 404
 
@@ -415,7 +428,7 @@ def api_delete_tag(db: Session, tag_id: int):
 @app.route('/api/tags/<int:tag_id>', methods=['PUT'])
 @with_db
 def api_update_tag(db: Session, tag_id: int):
-    tag = db.query(Tag).filter_by(id=tag_id).first()
+    tag = db.query(Tag).filter_by(id=tag_id, user_id=current_user.id).first()
     if not tag:
         return jsonify({'error': 'Tag not found'}), 404
 
@@ -427,8 +440,8 @@ def api_update_tag(db: Session, tag_id: int):
         name = data['name'].strip().lower()[:50]
         if not name:
             return jsonify({'error': 'name cannot be empty'}), 400
-        # Check uniqueness
-        existing = db.query(Tag).filter_by(name=name).first()
+        # Check uniqueness (within this user's tags)
+        existing = db.query(Tag).filter_by(name=name, user_id=current_user.id).first()
         if existing and existing.id != tag_id:
             return jsonify({'error': 'Tag name already exists'}), 400
         tag.name = name
@@ -454,8 +467,8 @@ def api_merge_tag(db: Session, tag_id: int):
     if tag_id == target_id:
         return jsonify({'error': 'Cannot merge a tag into itself'}), 400
 
-    source_tag = db.query(Tag).filter_by(id=tag_id).first()
-    target_tag = db.query(Tag).filter_by(id=target_id).first()
+    source_tag = db.query(Tag).filter_by(id=tag_id, user_id=current_user.id).first()
+    target_tag = db.query(Tag).filter_by(id=target_id, user_id=current_user.id).first()
 
     if not source_tag or not target_tag:
         return jsonify({'error': 'Source or target tag not found'}), 404
@@ -495,6 +508,7 @@ def api_merge_tag(db: Session, tag_id: int):
 def api_tag_rules(db: Session):
     rules = (
         db.query(TagRule)
+        .filter_by(user_id=current_user.id)
         .order_by(TagRule.priority.desc(), TagRule.id.asc())
         .all()
     )
@@ -518,13 +532,14 @@ def api_create_tag_rule(db: Session):
     if match_type not in ('contains', 'starts_with', 'regex'):
         return jsonify({'error': 'match_type must be contains, starts_with, or regex'}), 400
 
-    tag = db.query(Tag).filter_by(id=tag_id).first()
+    tag = db.query(Tag).filter_by(id=tag_id, user_id=current_user.id).first()
     if not tag:
         return jsonify({'error': 'Tag not found'}), 404
 
     priority = data.get('priority', 100)  # user rules default to 100
 
     rule = TagRule(
+        user_id=current_user.id,
         tag_id=tag_id,
         pattern=pattern,
         match_type=match_type,
@@ -539,7 +554,7 @@ def api_create_tag_rule(db: Session):
 @app.route('/api/tag-rules/<int:rule_id>', methods=['DELETE'])
 @with_db
 def api_delete_tag_rule(db: Session, rule_id: int):
-    rule = db.query(TagRule).filter_by(id=rule_id).first()
+    rule = db.query(TagRule).filter_by(id=rule_id, user_id=current_user.id).first()
     if not rule:
         return jsonify({'error': 'Rule not found'}), 404
 
@@ -554,7 +569,7 @@ def api_delete_tag_rule(db: Session, rule_id: int):
 @with_db
 def api_set_expense_tags(db: Session, expense_id: int):
     """Manually set tags on an expense. Replaces manual tags, keeps auto tags."""
-    expense = db.query(Expense).filter_by(id=expense_id).first()
+    expense = db.query(Expense).filter_by(id=expense_id, user_id=current_user.id).first()
     if not expense:
         return jsonify({'error': 'Expense not found'}), 404
 
@@ -573,7 +588,7 @@ def api_set_expense_tags(db: Session, expense_id: int):
     for tid in tag_ids:
         if not isinstance(tid, int):
             continue
-        tag = db.query(Tag).filter_by(id=tid).first()
+        tag = db.query(Tag).filter_by(id=tid, user_id=current_user.id).first()
         if not tag:
             continue
         # Check if auto-tag already exists for this tag
@@ -596,6 +611,8 @@ def api_remove_expense_tag(db: Session, expense_id: int, tag_id: int):
     Instead of deleting the ExpenseTag, we mark it as 'suppressed' so that
     it is not automatically re-applied by TagEngine rules in the future.
     """
+    if not _owns_expense(db, expense_id):
+        return jsonify({'error': 'Expense not found'}), 404
     et = db.query(ExpenseTag).filter_by(expense_id=expense_id, tag_id=tag_id).first()
     if et:
         et.source = 'suppressed'
@@ -610,6 +627,8 @@ def api_restore_expense_tag(db: Session, expense_id: int, tag_id: int):
     """
     Restore a suppressed tag by marking it as manual.
     """
+    if not _owns_expense(db, expense_id):
+        return jsonify({'error': 'Expense not found'}), 404
     et = db.query(ExpenseTag).filter_by(expense_id=expense_id, tag_id=tag_id).first()
     if et and et.source == 'suppressed':
         et.source = 'manual'
@@ -622,6 +641,8 @@ def api_restore_expense_tag(db: Session, expense_id: int, tag_id: int):
 @with_db
 def api_hard_remove_expense_tag(db: Session, expense_id: int, tag_id: int):
     """Permanently delete a tag from an expense (hard delete)."""
+    if not _owns_expense(db, expense_id):
+        return jsonify({'error': 'Expense not found'}), 404
     et = db.query(ExpenseTag).filter_by(expense_id=expense_id, tag_id=tag_id).first()
     if et:
         db.delete(et)
@@ -633,7 +654,7 @@ def api_hard_remove_expense_tag(db: Session, expense_id: int, tag_id: int):
 @with_db
 def api_expense_details(db: Session, expense_id: int):
     """Get expense details including matching rules for auto-tags."""
-    expense = db.query(Expense).filter_by(id=expense_id).first()
+    expense = db.query(Expense).filter_by(id=expense_id, user_id=current_user.id).first()
     if not expense:
         return jsonify({'error': 'Expense not found'}), 404
 
@@ -646,7 +667,7 @@ def api_expense_details(db: Session, expense_id: int):
     )
 
     # Find matching rules dynamically using TagEngine
-    engine = TagEngine(db)
+    engine = TagEngine(db, current_user.id)
     matching_rules = engine.get_all_matching_rules(expense)
     rule_map = {rule.tag_id: rule for rule in matching_rules}
 
@@ -690,7 +711,7 @@ def api_expense_details(db: Session, expense_id: int):
 @app.route('/api/retag', methods=['POST'])
 @with_db
 def api_retag(db: Session):
-    engine = TagEngine(db)
+    engine = TagEngine(db, current_user.id)
     applied = engine.retag_all()
     stats = engine.get_stats()
     return jsonify({
@@ -706,6 +727,7 @@ def api_retag(db: Session):
 def api_cards(db: Session):
     query = (
         db.query(Expense.card_number, func.count(Expense.id))
+        .filter(Expense.user_id == current_user.id)
         .filter(Expense.card_number.isnot(None))
         .filter(Expense.card_number != '')
     )

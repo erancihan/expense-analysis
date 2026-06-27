@@ -8,13 +8,15 @@ from src.models import ProcessedEmail
 from src.config import BANK_CONFIG
 from src.ingest import ingest_transactions, load_fingerprints
 from src.tag_engine import TagEngine
+from src.users import resolve_owner
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
 class ExpenseProcessor:
-    def __init__(self, manual=False):
+    def __init__(self, manual=False, owner_email=None):
         self.manual = manual
+        self.owner_email = owner_email
         self.gmail_client = GmailClient()
         self.parsers = {}
         self._load_parsers()
@@ -34,13 +36,17 @@ class ExpenseProcessor:
         db_gen = get_db()
         db = next(db_gen)
         try:
+            # All ingested data belongs to one owner (the configured Gmail
+            # account's user). Resolve once per cycle.
+            owner = resolve_owner(db, self.owner_email)
+            logger.info(f"Processing into account: {owner.email}")
             for bank_id, config in BANK_CONFIG.items():
-                self._process_bank(bank_id, config, db)
+                self._process_bank(bank_id, config, db, owner.id)
         finally:
             next(db_gen, None) # Close the generator
         logger.info("Processing cycle finished.")
 
-    def _process_bank(self, bank_id, config, db: Session):
+    def _process_bank(self, bank_id, config, db: Session, user_id: int):
         senders = config.get('senders', [])
         subjects = config.get('subject_keywords', [])
         
@@ -56,7 +62,7 @@ class ExpenseProcessor:
         for i, msg in enumerate(messages):
             message_id = msg['id']
             
-            # Check if already processed
+            # Check if already processed (message ids are globally unique)
             existing = db.query(ProcessedEmail).filter_by(message_id=message_id).first()
             if existing and existing.status == 'SUCCESS':
                 continue
@@ -75,10 +81,10 @@ class ExpenseProcessor:
                     continue
 
             try:
-                new_expenses = self._process_message(bank_id, message_id, db)
+                new_expenses = self._process_message(bank_id, message_id, db, user_id)
                 # Mark as success
                 if not existing:
-                    processed = ProcessedEmail(message_id=message_id, status='SUCCESS')
+                    processed = ProcessedEmail(message_id=message_id, status='SUCCESS', user_id=user_id)
                     db.add(processed)
                 else:
                     existing.status = 'SUCCESS'
@@ -87,12 +93,12 @@ class ExpenseProcessor:
 
                 # Auto-tag the newly-inserted expenses (now that they have ids).
                 if new_expenses:
-                    TagEngine(db).apply_rules(new_expenses)
+                    TagEngine(db, user_id).apply_rules(new_expenses)
             except Exception as e:
                 logger.error(f"Failed to process message {message_id}: {e}")
                 db.rollback()
                 if not existing:
-                    processed = ProcessedEmail(message_id=message_id, status='FAILED')
+                    processed = ProcessedEmail(message_id=message_id, status='FAILED', user_id=user_id)
                     db.add(processed)
                     db.commit()
 
@@ -114,7 +120,7 @@ class ExpenseProcessor:
         logger.info(f"  Subject: {headers.get('Subject', '(no subject)')}")
         logger.info(f"  Date:    {headers.get('Date', '(unknown)')}")
 
-    def _process_message(self, bank_id, message_id, db: Session):
+    def _process_message(self, bank_id, message_id, db: Session, user_id: int):
         """Parse a message's PDF attachments and ingest their transactions.
 
         Returns the list of newly-inserted (uncommitted) Expense objects so the
@@ -135,9 +141,9 @@ class ExpenseProcessor:
             logger.error(f"No parser found for {bank_id}")
             return []
 
-        # Dedup across this message's attachments (and against existing rows)
-        # via a shared fingerprint set, so the same expense isn't inserted twice.
-        fingerprints = load_fingerprints(db)
+        # Dedup across this message's attachments (and against this user's
+        # existing rows) via a shared fingerprint set.
+        fingerprints = load_fingerprints(db, user_id)
         new_expenses = []
 
         for part in full_msg['payload'].get('parts', []):
@@ -155,6 +161,7 @@ class ExpenseProcessor:
                         new, _ = ingest_transactions(
                             db,
                             transactions,
+                            user_id=user_id,
                             bank_source=bank_id,
                             fingerprints=fingerprints,
                         )

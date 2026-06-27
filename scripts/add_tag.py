@@ -32,6 +32,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.database import init_db, SessionLocal
 from src.models import Tag, TagRule
+from src.users import resolve_owner, NoOwnerError
 
 logging.basicConfig(
     level=logging.INFO,
@@ -57,6 +58,7 @@ def main():
                         help='How to match patterns (default: contains)')
     parser.add_argument('--priority', type=int, default=100,
                         help='Rule priority, higher = checked first (default: 100)')
+    parser.add_argument('--email', help='Owning user (default: sole/first admin)')
     args = parser.parse_args()
 
     name = args.name.strip().lower()
@@ -68,8 +70,14 @@ def main():
     db = SessionLocal()
 
     try:
+        try:
+            owner = resolve_owner(db, args.email)
+        except NoOwnerError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+
         # Create or get tag
-        tag = db.query(Tag).filter_by(name=name).first()
+        tag = db.query(Tag).filter_by(name=name, user_id=owner.id).first()
         if tag:
             print(f"Tag '{name}' already exists (id={tag.id})")
             # Update color/icon if provided and different
@@ -85,6 +93,7 @@ def main():
                 print(f"  Updated: color={tag.color}, icon={tag.icon}")
         else:
             tag = Tag(
+                user_id=owner.id,
                 name=name,
                 color=args.color,
                 icon=args.icon,
@@ -111,6 +120,7 @@ def main():
                     continue
 
                 rule = TagRule(
+                    user_id=owner.id,
                     tag_id=tag.id,
                     pattern=pattern,
                     match_type=args.match_type,

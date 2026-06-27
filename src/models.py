@@ -33,6 +33,7 @@ class Expense(Base):
     __tablename__ = 'expenses'
 
     id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
     date = Column(DateTime, nullable=False)
     description = Column(String, nullable=False)
     amount = Column(Float, nullable=False)
@@ -55,7 +56,8 @@ class Tag(Base):
     __tablename__ = 'tags'
 
     id = Column(Integer, primary_key=True)
-    name = Column(String, unique=True, nullable=False)       # "restaurant", "grocery"
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
+    name = Column(String, nullable=False)                    # "restaurant", "grocery"
     color = Column(String, default='#6366f1')                # hex color for UI chip
     icon = Column(String, default='🏷️')                      # emoji
     is_default = Column(Boolean, default=False)              # shipped with app
@@ -64,6 +66,11 @@ class Tag(Base):
     # Relationships
     expense_tags = relationship('ExpenseTag', back_populates='tag', cascade='all, delete-orphan')
     rules = relationship('TagRule', back_populates='tag', cascade='all, delete-orphan')
+
+    # Tag names are unique per user, not globally.
+    __table_args__ = (
+        UniqueConstraint('user_id', 'name', name='uq_tags_user_name'),
+    )
 
     def __repr__(self):
         return f"<Tag(name='{self.name}')>"
@@ -82,6 +89,7 @@ class TagRule(Base):
     __tablename__ = 'tag_rules'
 
     id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
     tag_id = Column(Integer, ForeignKey('tags.id'), nullable=False)
     pattern = Column(String, nullable=False)                 # "UBER", "YEMEKSEPETI"
     match_type = Column(String, default='contains')          # contains | starts_with | regex
@@ -129,6 +137,9 @@ class ProcessedEmail(Base):
     __tablename__ = 'processed_emails'
 
     id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
+    # Gmail message ids are globally unique (each user connects their own Gmail),
+    # so a plain unique constraint is sufficient; user_id scopes lookups.
     message_id = Column(String, unique=True, nullable=False)
     processed_at = Column(DateTime, default=utc_now)
     status = Column(String, default='SUCCESS') # SUCCESS, FAILED

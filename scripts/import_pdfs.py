@@ -26,9 +26,19 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _arg_value(flag):
+    """Return the value following `--flag` in argv, or None."""
+    if flag in sys.argv:
+        i = sys.argv.index(flag)
+        if i + 1 < len(sys.argv):
+            return sys.argv[i + 1]
+    return None
+
+
 def main():
     clear = '--clear' in sys.argv
     dry_run = '--dry-run' in sys.argv
+    owner_email = _arg_value('--email')
 
     db = SessionLocal()
 
@@ -36,7 +46,12 @@ def main():
         if dry_run:
             logger.info("DRY RUN — no data will be written")
 
-        stats = import_pdfs(db, clear=clear, dry_run=dry_run)
+        from src.users import NoOwnerError
+        try:
+            stats = import_pdfs(db, clear=clear, dry_run=dry_run, owner_email=owner_email)
+        except NoOwnerError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
 
         print(f"\n{'='*50}")
         print(f"Import Summary:")

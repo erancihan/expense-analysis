@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.database import SessionLocal
 from src.models import Tag, TagRule
+from src.users import resolve_owner, NoOwnerError
 
 logging.basicConfig(
     level=logging.INFO,
@@ -37,13 +38,15 @@ DEFAULT_OUTPUT = os.path.join(
 )
 
 
-def backup_tags(output_path: str) -> None:
-    """Export all tags and rules from the DB to a YAML file."""
+def backup_tags(output_path: str, email: str = None) -> None:
+    """Export one user's tags and rules from the DB to a YAML file."""
     db = SessionLocal()
     try:
-        tags = db.query(Tag).order_by(Tag.name).all()
+        owner = resolve_owner(db, email)
+        tags = db.query(Tag).filter_by(user_id=owner.id).order_by(Tag.name).all()
         rules = (
             db.query(TagRule)
+            .filter_by(user_id=owner.id)
             .order_by(TagRule.tag_id, TagRule.priority.desc(), TagRule.id)
             .all()
         )
@@ -107,9 +110,14 @@ def main():
         default=DEFAULT_OUTPUT,
         help=f'Output YAML path (default: {DEFAULT_OUTPUT})',
     )
+    parser.add_argument('--email', help='User whose tags to back up (default: sole/first admin)')
     args = parser.parse_args()
 
-    backup_tags(args.output)
+    try:
+        backup_tags(args.output, args.email)
+    except NoOwnerError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
     print(f"Backup complete → {args.output}")
 
 

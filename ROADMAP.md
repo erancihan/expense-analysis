@@ -17,7 +17,7 @@ each user has isolated expenses and connects their own Gmail.
 
 - [x] **Phase 1 — Stabilize the WIP** *(done 2026-06-26)*
 - [x] **Phase 0 — Hygiene** *(done 2026-06-26)*
-- [~] **Phase 2 — Full multi-user + security** *(in progress: auth gate landed; data isolation next)*
+- [~] **Phase 2 — Full multi-user + security** *(2a auth + isolation done; 2b security & 2c per-user Gmail remain)*
 - [ ] **Phase 3 — Tests & CI**
 - [ ] **Phase 4 — Features**
 
@@ -72,16 +72,20 @@ signup) · invite/admin-only registration.
 - [x] `SECRET_KEY` + `HttpOnly`/`SameSite=Lax`/`Secure` session cookies from config.
 - [x] Tests: `test_auth.py` (gate, login/logout, inactive user, bad password, open-redirect).
 
-**2a-ii. Data isolation** *(next)*
-- [ ] Add `user_id` FK to `Expense`, `Tag`, `TagRule`, `ProcessedEmail`. Alembic
-      data-migration: add nullable columns → backfill existing rows to the first admin →
-      set non-null (batch mode for SQLite).
-- [ ] **Scope every query by `current_user.id`** across all `web.py` endpoints
-      (the bulk of the work and the main correctness risk).
-- [ ] Thread `user_id` through ingestion (`ingest.py`, `import_pdfs.py`, `processor.py`,
-      CLI scripts) — imports attribute to the owning user.
-- [ ] Seed per-user default tags on account creation. Isolation tests (user A can't see
-      user B's data).
+**2a-ii. Data isolation** ✅ *(done 2026-06-26)*
+- [x] `user_id` FK on `Expense`, `Tag`, `TagRule`, `ProcessedEmail`; tag names unique
+      per-user. Alembic data-migration adds nullable columns → backfills to an owner
+      (auto-creates a `legacy@local` admin if pre-existing data has no user) → sets
+      non-null (SQLite batch mode). Verified on a legacy data upgrade.
+- [x] Every `web.py` query scoped by `current_user.id`; cross-user reads/writes/deletes
+      return 404 (incl. an `_owns_expense` guard on the tag endpoints).
+- [x] Per-user `TagEngine` (rules/retag/stats scoped) — closes the "one user's rules tag
+      another's expenses" leak.
+- [x] `user_id` threaded through ingestion (`ingest`, `import_pdfs`, `processor`) and CLI
+      tools (`seed`, `add_tag`, `retag`, `backup_tags`, `import_pdfs`) via
+      `resolve_owner(db, --email)` (defaults to the sole/first admin).
+- [x] Per-user default tags seeded on account creation (`create_user.py`).
+- [x] Isolation tests (web boundary + ingestion dedup separation). Full suite: 30 passing.
 
 **2b. Security hardening**
 - [ ] CSRF tokens on all mutating endpoints (none today).

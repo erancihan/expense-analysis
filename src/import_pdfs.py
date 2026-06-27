@@ -17,11 +17,13 @@ import glob
 import logging
 import os
 import re
+from typing import Optional
 from sqlalchemy.orm import Session
 from src.models import Expense, ProcessedEmail
 from src.parsers.isbank import IsbankParser
 from src.tag_engine import TagEngine
 from src.ingest import ingest_transactions, load_fingerprints
+from src.users import resolve_owner
 
 logger = logging.getLogger(__name__)
 
@@ -63,18 +65,30 @@ def parse_pdf_filename(basename: str) -> dict:
     return {}
 
 
-def import_pdfs(db: Session, clear: bool = False, dry_run: bool = False) -> dict:
+def import_pdfs(
+    db: Session,
+    clear: bool = False,
+    dry_run: bool = False,
+    user_id: Optional[int] = None,
+    owner_email: Optional[str] = None,
+) -> dict:
     """
     Import all statement PDFs from data/pdfs/ into the database.
 
     Args:
         db: SQLAlchemy session
-        clear: If True, delete all existing expenses before importing
+        clear: If True, delete this user's expenses before importing
         dry_run: If True, parse and count but don't insert
+        user_id: owning user for imported data; resolved from owner_email / the
+            sole admin when not given
+        owner_email: email used to resolve the owner when user_id is omitted
 
     Returns:
         Dict with import statistics
     """
+    if user_id is None:
+        user_id = resolve_owner(db, owner_email).id
+
     stats = {
         'files_found': 0,
         'files_parsed': 0,
@@ -99,27 +113,36 @@ def import_pdfs(db: Session, clear: bool = False, dry_run: bool = False) -> dict
 
     logger.info(f"Found {len(pdf_files)} PDF files in {DATA_DIR}")
 
-    # Clear if requested
+    # Clear if requested (this user's data only)
     if clear and not dry_run:
         from src.models import ExpenseTag
-        db.query(ExpenseTag).delete()
-        deleted = db.query(Expense).delete()
-        db.query(ProcessedEmail).delete()
+        user_expense_ids = [
+            e.id for e in db.query(Expense.id).filter_by(user_id=user_id).all()
+        ]
+        if user_expense_ids:
+            db.query(ExpenseTag).filter(
+                ExpenseTag.expense_id.in_(user_expense_ids)
+            ).delete(synchronize_session=False)
+        deleted = db.query(Expense).filter_by(user_id=user_id).delete()
+        db.query(ProcessedEmail).filter_by(user_id=user_id).delete()
         db.commit()
         logger.info(f"Cleared {deleted} existing expenses, their tags, and processed email records")
 
-    # Load message IDs imported in PRIOR runs (SUCCESS only). Used solely to
-    # skip re-parsing PDFs we've already imported — it is NOT updated mid-loop,
-    # so sibling PDFs from the same email (different cards) are still processed.
+    # Load message IDs imported in PRIOR runs (SUCCESS only) for this user. Used
+    # solely to skip re-parsing PDFs we've already imported — it is NOT updated
+    # mid-loop, so sibling PDFs from the same email (different cards) are still
+    # processed.
     already_processed = set()
     if not clear:
-        for row in db.query(ProcessedEmail.message_id).filter_by(status='SUCCESS').all():
+        for row in db.query(ProcessedEmail.message_id).filter_by(
+            status='SUCCESS', user_id=user_id
+        ).all():
             already_processed.add(row.message_id)
         if already_processed:
             logger.info(f"Found {len(already_processed)} already-processed message IDs")
 
-    # Build a set of existing expense fingerprints for dedup
-    existing_fingerprints = set() if clear else load_fingerprints(db)
+    # Build a set of this user's existing expense fingerprints for dedup
+    existing_fingerprints = set() if clear else load_fingerprints(db, user_id)
     if existing_fingerprints:
         logger.info(f"Loaded {len(existing_fingerprints)} existing expense fingerprints")
 
@@ -158,6 +181,7 @@ def import_pdfs(db: Session, clear: bool = False, dry_run: bool = False) -> dict
             new, ing = ingest_transactions(
                 db,
                 transactions,
+                user_id=user_id,
                 bank_source=fields.get('bank', 'isbank'),
                 fallback_period=filename_period,
                 fingerprints=existing_fingerprints,
@@ -187,14 +211,14 @@ def import_pdfs(db: Session, clear: bool = False, dry_run: bool = False) -> dict
             if record:
                 record.status = status
             else:
-                db.add(ProcessedEmail(message_id=eid, status=status))
+                db.add(ProcessedEmail(message_id=eid, status=status, user_id=user_id))
 
         db.commit()
         if new_expenses:
             logger.info(f"Inserted {stats['new_inserted']} new expenses")
 
             # Auto-tag new expenses
-            engine = TagEngine(db)
+            engine = TagEngine(db, user_id)
             stats['tags_applied'] = engine.apply_rules(new_expenses)
             logger.info(f"Applied {stats['tags_applied']} tags to new expenses")
 

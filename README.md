@@ -107,6 +107,12 @@ There is no public sign-up — an admin provisions accounts:
 make create-user EMAIL=you@example.com ADMIN=1     # prompts for a password
 ```
 
+Each user has fully isolated data (expenses, tags, rules) and gets their own
+copy of the default tags on creation. The CLI/ingestion tools attribute data to
+the sole admin by default; with multiple users, pass `--email` to choose the
+owner (e.g. `./scripts/import_pdfs.py --email you@example.com`,
+`./scripts/retag.py --email …`).
+
 Before deploying, set a strong `secret_key` (and `session_cookie_secure: true`
 behind HTTPS) in `config.local.yaml` — see `config.local.yaml.example`.
 
