@@ -13,7 +13,9 @@ from flask import Blueprint, render_template, request, redirect, url_for
 from flask_login import login_user, logout_user, login_required, current_user
 from werkzeug.security import check_password_hash
 
+from src.config import LOGIN_RATELIMIT
 from src.database import SessionLocal
+from src.extensions import limiter
 from src.models import User
 
 logger = logging.getLogger(__name__)
@@ -30,6 +32,7 @@ def _is_safe_next(target: str) -> bool:
 
 
 @auth_bp.route('/login', methods=['GET', 'POST'])
+@limiter.limit(LOGIN_RATELIMIT, methods=['POST'])
 def login():
     if current_user.is_authenticated:
         return redirect(url_for('index'))

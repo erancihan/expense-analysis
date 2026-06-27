@@ -5,6 +5,23 @@
  * expense list with pagination/filters, tag management, and modals.
  */
 
+// Auto-attach the CSRF token to every state-changing same-origin request so
+// each fetch() call site doesn't have to. Flask-WTF reads the X-CSRFToken header.
+(function installCsrfFetch() {
+    const meta = document.querySelector('meta[name="csrf-token"]');
+    const token = meta ? meta.getAttribute('content') : null;
+    if (!token) return;
+    const safe = new Set(['GET', 'HEAD', 'OPTIONS', 'TRACE']);
+    const origFetch = window.fetch.bind(window);
+    window.fetch = function (input, init = {}) {
+        const method = (init.method || (typeof input !== 'string' && input.method) || 'GET').toUpperCase();
+        if (!safe.has(method)) {
+            init = { ...init, headers: { ...(init.headers || {}), 'X-CSRFToken': token } };
+        }
+        return origFetch(input, init);
+    };
+})();
+
 let chartInstance = null;
 
 function app() {

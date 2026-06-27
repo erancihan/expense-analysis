@@ -12,14 +12,16 @@ from functools import wraps
 
 from flask import Flask, jsonify, request, send_from_directory, render_template, redirect, url_for, Response
 from flask_login import LoginManager, current_user
+from werkzeug.middleware.proxy_fix import ProxyFix
 from sqlalchemy import func, extract
 from sqlalchemy.orm import Session
 
-from src.config import SECRET_KEY, SESSION_COOKIE_SECURE
+from src.config import SECRET_KEY, SESSION_COOKIE_SECURE, TRUSTED_PROXIES
 from src.database import SessionLocal
 from src.models import Expense, Tag, TagRule, ExpenseTag, User
 from src.tag_engine import TagEngine
 from src.auth import auth_bp
+from src.extensions import csrf, limiter
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +33,11 @@ TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__fi
 app = Flask(__name__, static_folder=STATIC_DIR, template_folder=TEMPLATE_DIR)
 app.json.ensure_ascii = False
 
+# Behind a reverse proxy, read the real client IP / scheme from X-Forwarded-*
+# (needed for correct rate-limiting and Secure-cookie/HTTPS detection).
+if TRUSTED_PROXIES > 0:
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=TRUSTED_PROXIES, x_proto=TRUSTED_PROXIES)
+
 # ── Auth / sessions ──────────────────────────────────────────────────────────
 
 app.secret_key = SECRET_KEY
@@ -39,6 +46,10 @@ app.config.update(
     SESSION_COOKIE_SAMESITE='Lax',
     SESSION_COOKIE_SECURE=SESSION_COOKIE_SECURE,
 )
+
+# CSRF protection (state-changing requests) and login rate limiting.
+csrf.init_app(app)
+limiter.init_app(app)
 
 login_manager = LoginManager()
 login_manager.init_app(app)
@@ -80,13 +91,30 @@ def require_login():
 
 # ── Security headers ────────────────────────────────────────────────────────
 
+# Content-Security-Policy. 'unsafe-inline'/'unsafe-eval' are required by the
+# current stack (the Tailwind Play CDN and Alpine.js evaluate expressions at
+# runtime); the policy still restricts *sources* to self + the known CDNs and
+# locks down framing, base-uri and form-action. Tightening to a nonce-based
+# policy requires vendoring Tailwind + Alpine's CSP build (tracked in ROADMAP).
+_CSP = "; ".join([
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://cdn.jsdelivr.net",
+    "style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://fonts.googleapis.com",
+    "font-src 'self' https://fonts.gstatic.com",
+    "img-src 'self' data:",
+    "connect-src 'self'",
+    "frame-ancestors 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+])
+
+
 @app.after_request
 def add_security_headers(response: Response) -> Response:
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['X-Frame-Options'] = 'DENY'
     response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
-    # TODO(security): Add CSP with nonces when serving inline scripts
-    # TODO(security): Add authentication when expanding to multi-user
+    response.headers.setdefault('Content-Security-Policy', _CSP)
     return response
 
 

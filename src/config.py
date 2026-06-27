@@ -28,6 +28,11 @@ SECRET_KEY = os.getenv('SECRET_KEY', _DEV_SECRET)
 SESSION_COOKIE_SECURE = os.getenv('SESSION_COOKIE_SECURE', 'false').lower() in ('1', 'true', 'yes', 'on')
 # No public sign-up by default — users are created by an admin (scripts/create_user.py).
 ALLOW_REGISTRATION = os.getenv('ALLOW_REGISTRATION', 'false').lower() in ('1', 'true', 'yes', 'on')
+# Number of trusted reverse proxies in front of the app (enables ProxyFix so the
+# real client IP / scheme are read from X-Forwarded-* headers). 0 = direct.
+TRUSTED_PROXIES = int(os.getenv('TRUSTED_PROXIES', 0))
+# Rate limit applied to the login endpoint (brute-force defense).
+LOGIN_RATELIMIT = os.getenv('LOGIN_RATELIMIT', '10 per minute')
 
 # Bank Configuration
 BANK_CONFIG = {
@@ -50,6 +55,7 @@ def _load_local_config():
     global DATABASE_URL, GMAIL_CREDENTIALS_PATH, GMAIL_TOKEN_PATH
     global CHECK_INTERVAL_MINUTES, BANK_CONFIG
     global SECRET_KEY, SESSION_COOKIE_SECURE, ALLOW_REGISTRATION
+    global TRUSTED_PROXIES, LOGIN_RATELIMIT
 
     if not os.path.exists(LOCAL_CONFIG_PATH):
         return
@@ -74,6 +80,10 @@ def _load_local_config():
         SESSION_COOKIE_SECURE = bool(local['session_cookie_secure'])
     if 'allow_registration' in local:
         ALLOW_REGISTRATION = bool(local['allow_registration'])
+    if 'trusted_proxies' in local:
+        TRUSTED_PROXIES = int(local['trusted_proxies'])
+    if 'login_ratelimit' in local:
+        LOGIN_RATELIMIT = local['login_ratelimit']
 
 _load_local_config()
 

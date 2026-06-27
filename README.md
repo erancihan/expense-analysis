@@ -116,6 +116,31 @@ owner (e.g. `./scripts/import_pdfs.py --email you@example.com`,
 Before deploying, set a strong `secret_key` (and `session_cookie_secure: true`
 behind HTTPS) in `config.local.yaml` — see `config.local.yaml.example`.
 
+### Deploying (internet-facing)
+
+The app is built to sit behind an HTTPS reverse proxy (Caddy/nginx) with a
+WSGI server (gunicorn). Security measures already in place:
+
+- **Auth gate** — every route requires a session; admin-provisioned accounts only.
+- **CSRF protection** — all state-changing requests need a token (sent via the
+  `X-CSRFToken` header by the SPA, a hidden field by forms).
+- **Login rate limiting** — `login_ratelimit` (default `10 per minute`).
+- **Security headers** — `Content-Security-Policy`, `X-Frame-Options: DENY`,
+  `X-Content-Type-Options: nosniff`, `Referrer-Policy`.
+
+Checklist before exposing it:
+
+1. Set a strong `secret_key` (`python -c "import secrets; print(secrets.token_hex(32))"`).
+2. Terminate TLS at the proxy; set `session_cookie_secure: true` and
+   `trusted_proxies: 1` so client IP / HTTPS are read from `X-Forwarded-*`.
+3. Run under gunicorn, e.g. `gunicorn -w 2 'src.web:app'`. For more than one
+   worker, point the rate limiter at redis (in-memory state isn't shared).
+
+> Note: the CSP currently allows `'unsafe-inline'`/`'unsafe-eval'` because the
+> Tailwind Play CDN and Alpine.js evaluate at runtime. Vendoring Tailwind as a
+> built stylesheet and using Alpine's CSP build would allow a strict policy
+> (tracked in `ROADMAP.md`).
+
 ### Returning Use
 
 ```bash

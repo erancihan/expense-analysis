@@ -24,6 +24,7 @@
         <form method="POST"
               action="{{ url_for('auth.login', next=next) if next else url_for('auth.login') }}"
               class="bg-slate-900/70 border border-slate-800 rounded-2xl p-6 space-y-4 shadow-xl">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             {% if error %}
             <div class="bg-red-500/10 border border-red-500/30 text-red-300 text-sm rounded-lg px-3 py-2">
                 {{ error }}

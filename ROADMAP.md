@@ -17,7 +17,7 @@ each user has isolated expenses and connects their own Gmail.
 
 - [x] **Phase 1 — Stabilize the WIP** *(done 2026-06-26)*
 - [x] **Phase 0 — Hygiene** *(done 2026-06-26)*
-- [~] **Phase 2 — Full multi-user + security** *(2a auth + isolation done; 2b security & 2c per-user Gmail remain)*
+- [~] **Phase 2 — Full multi-user + security** *(2a auth+isolation & 2b hardening done; 2c per-user Gmail remains)*
 - [ ] **Phase 3 — Tests & CI**
 - [ ] **Phase 4 — Features**
 
@@ -87,14 +87,21 @@ signup) · invite/admin-only registration.
 - [x] Per-user default tags seeded on account creation (`create_user.py`).
 - [x] Isolation tests (web boundary + ingestion dedup separation). Full suite: 30 passing.
 
-**2b. Security hardening**
-- [ ] CSRF tokens on all mutating endpoints (none today).
-- [ ] CSP with nonces (`web.py` TODO) + SRI/pin the Tailwind/ECharts/Alpine CDNs (or vendor).
-- [ ] Login rate-limiting; `Secure`/`HttpOnly`/`SameSite` cookies; `SECRET_KEY` + OAuth
-      client secret from env.
-- [ ] Document HTTPS reverse-proxy (Caddy/nginx) deployment.
+**2b. Security hardening** ✅ *(done 2026-06-26)*
+- [x] CSRF protection on all mutating requests (Flask-WTF); SPA sends the token via an
+      `X-CSRFToken` header (auto-injected by a `fetch` wrapper), forms via a hidden field.
+      Verified end-to-end with protection on (tokenless POST → 400).
+- [x] `Content-Security-Policy` header (restricts sources; `frame-ancestors`/`base-uri`/
+      `form-action` locked down) + existing `X-Frame-Options`/`nosniff`/`Referrer-Policy`.
+- [x] Login rate-limiting (Flask-Limiter, `login_ratelimit`, default 10/min).
+- [x] `Secure`/`HttpOnly`/`SameSite=Lax` cookies; `SECRET_KEY` from env/config with a
+      dev-default warning; `ProxyFix` (`trusted_proxies`) for correct IP/scheme behind a proxy.
+- [x] HTTPS reverse-proxy deployment documented (README "Deploying").
+- [ ] **Follow-up:** strict nonce-based CSP needs vendoring Tailwind (built CSS) + Alpine's
+      CSP build to drop `'unsafe-inline'`/`'unsafe-eval'`; SRI/version-pin the jsDelivr
+      scripts. (Tailwind Play CDN can't take SRI.) Tracked for Phase 4.
 
-**2c. Per-user Gmail**
+**2c. Per-user Gmail** *(remaining in Phase 2)*
 - [ ] Per-user OAuth connect + per-user token storage (today `GmailClient` uses global
       `secrets/*.json`); processor/download iterate users. Can ship after 2a/2b.
 

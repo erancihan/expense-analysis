@@ -20,7 +20,15 @@ from werkzeug.security import generate_password_hash
 
 from src.models import Base, User, Expense, Tag
 from src.database import engine, SessionLocal
+from src.extensions import limiter
 from src.web import app
+
+# CSRF and rate limiting are verified in SecurityHardeningTestCase; disable them
+# for the functional auth/isolation tests so requests don't need tokens and the
+# many logins don't trip the limiter. (limiter.enabled is the runtime switch —
+# RATELIMIT_ENABLED is only read at init_app time.)
+app.config['WTF_CSRF_ENABLED'] = False
+limiter.enabled = False
 
 
 class AuthTestCase(unittest.TestCase):
@@ -188,6 +196,53 @@ class IsolationTestCase(unittest.TestCase):
         self._login('a@example.com')
         r = self.client.post('/api/tags', json={'name': 'b_only'})
         self.assertIn(r.status_code, (200, 201))
+
+
+class SecurityHardeningTestCase(unittest.TestCase):
+    """CSRF, rate limiting and security headers (Phase 2b)."""
+
+    @classmethod
+    def setUpClass(cls):
+        Base.metadata.create_all(engine)
+
+    def setUp(self):
+        db = SessionLocal()
+        try:
+            db.query(User).delete()
+            db.add(User(email='owner@example.com',
+                        password_hash=generate_password_hash('pw'), is_active=True))
+            db.commit()
+        finally:
+            db.close()
+        self.client = app.test_client()
+
+    def tearDown(self):
+        # Restore the relaxed defaults the other test classes rely on.
+        app.config['WTF_CSRF_ENABLED'] = False
+        limiter.enabled = False
+
+    def test_csrf_rejects_tokenless_post(self):
+        app.config['WTF_CSRF_ENABLED'] = True
+        r = self.client.post('/login', data={'email': 'owner@example.com', 'password': 'pw'})
+        self.assertEqual(r.status_code, 400)
+
+    def test_login_page_carries_csrf_field(self):
+        html = self.client.get('/login').get_data(as_text=True)
+        self.assertIn('name="csrf_token"', html)
+
+    def test_login_is_rate_limited(self):
+        limiter.enabled = True
+        codes = [
+            self.client.post('/login', data={'email': 'x@x', 'password': 'bad'}).status_code
+            for _ in range(15)
+        ]
+        self.assertIn(429, codes, 'login should be rate limited after repeated attempts')
+
+    def test_security_headers_present(self):
+        r = self.client.get('/login')
+        self.assertEqual(r.headers.get('X-Content-Type-Options'), 'nosniff')
+        self.assertEqual(r.headers.get('X-Frame-Options'), 'DENY')
+        self.assertIn('Content-Security-Policy', r.headers)
 
 
 if __name__ == '__main__':

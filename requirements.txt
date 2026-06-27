@@ -11,3 +11,5 @@ python-dotenv
 pyyaml
 flask
 flask-login
+flask-wtf
+flask-limiter

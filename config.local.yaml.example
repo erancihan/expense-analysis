@@ -14,6 +14,11 @@
 # session_cookie_secure: true
 # Public self-sign-up is OFF by default; create users with scripts/create_user.py.
 # allow_registration: false
+# Number of trusted reverse proxies in front of the app (1 for a single nginx/
+# Caddy). Enables reading the real client IP/scheme from X-Forwarded-* headers.
+# trusted_proxies: 1
+# Rate limit on the login endpoint (brute-force defense).
+# login_ratelimit: "10 per minute"
 
 # bank_config:
 #   isbank:
