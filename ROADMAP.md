@@ -17,9 +17,9 @@ each user has isolated expenses and connects their own Gmail.
 
 - [x] **Phase 1 — Stabilize the WIP** *(done 2026-06-26)*
 - [x] **Phase 0 — Hygiene** *(done 2026-06-26)*
-- [~] **Phase 2 — Full multi-user + security** *(2a auth+isolation & 2b hardening done; 2c per-user Gmail remains)*
-- [ ] **Phase 3 — Tests & CI**
-- [ ] **Phase 4 — Features**
+- [x] **Phase 2 — Full multi-user + security** *(2a auth+isolation, 2b hardening, 2c per-user Gmail — all done)*
+- [~] **Phase 3 — Tests & CI** *(parser/tag-engine/auth tests + CI done; optional SessionStart hook + PDF-fixture test remain)*
+- [~] **Phase 4 — Features** *(CSV export done; budgets/cross-currency/strict-CSP remain)*
 
 ---
 
@@ -101,9 +101,18 @@ signup) · invite/admin-only registration.
       CSP build to drop `'unsafe-inline'`/`'unsafe-eval'`; SRI/version-pin the jsDelivr
       scripts. (Tailwind Play CDN can't take SRI.) Tracked for Phase 4.
 
-**2c. Per-user Gmail** *(remaining in Phase 2)*
-- [ ] Per-user OAuth connect + per-user token storage (today `GmailClient` uses global
-      `secrets/*.json`); processor/download iterate users. Can ship after 2a/2b.
+**2c. Per-user Gmail** ✅ *(done 2026-06-26)*
+- [x] `User.gmail_token` column (+ migration) stores each user's OAuth token.
+- [x] Web OAuth flow: `/gmail/connect` → Google consent → `/gmail/callback` stores the
+      token; `/gmail/disconnect` clears it; `/api/gmail/status` drives the UI. State
+      param guards the callback; works for a headless server (the CLI desktop flow can't).
+- [x] `GmailClient.from_token_json()` builds a per-user client and refreshes/persists the
+      token; the processor iterates connected users (each user's Gmail → their account),
+      falling back to the legacy global-token single-account mode when none are connected.
+- [x] Settings UI: Connect/Disconnect (hidden until an OAuth client is configured).
+- [x] Google Cloud *Web client* setup documented (README). Tests mock the Google libs
+      (status/connect/callback/disconnect + processor iteration). Full suite: 69 passing.
+- [ ] *Follow-up:* encrypt the `gmail_token` column at rest.
 
 ### Decisions (resolved 2026-06-26)
 - **Auth:** password accounts (werkzeug hashing + Flask-Login sessions).

@@ -29,6 +29,8 @@ function app() {
         // ── State ──────────────────────────────────────────────────
         scrolled: false,
         settingsModalOpen: false,
+        gmailConnected: false,
+        gmailAvailable: false,
         statementMonth: '',
         statementCutoffDay: parseInt(localStorage.getItem('cutoffDay')) || 28,
         loading: false,
@@ -137,11 +139,30 @@ function app() {
             await Promise.all([
                 this.fetchTags(),
                 this.fetchCards(),
+                this.fetchGmailStatus(),
             ]);
             await Promise.all([
                 this.fetchSummary(),
                 this.fetchExpenses(),
             ]);
+        },
+
+        async fetchGmailStatus() {
+            try {
+                const res = await fetch('/api/gmail/status');
+                const data = await res.json();
+                this.gmailConnected = data.connected;
+                this.gmailAvailable = data.available;
+            } catch (e) {
+                this.gmailConnected = false;
+                this.gmailAvailable = false;
+            }
+        },
+
+        async disconnectGmail() {
+            if (!confirm('Disconnect Gmail? Statements will no longer import automatically.')) return;
+            await fetch('/gmail/disconnect', { method: 'POST' });
+            await this.fetchGmailStatus();
         },
 
         // ── API calls ─────────────────────────────────────────────

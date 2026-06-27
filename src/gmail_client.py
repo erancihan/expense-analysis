@@ -1,5 +1,6 @@
 import os.path
 import base64
+import json
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -12,11 +13,35 @@ SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
 logger = logging.getLogger(__name__)
 
 class GmailClient:
-    def __init__(self, credentials_path='secrets/credentials.json', token_path='secrets/token.json'):
+    def __init__(self, credentials_path='secrets/credentials.json', token_path='secrets/token.json', creds=None):
         self.credentials_path = credentials_path
         self.token_path = token_path
         self.service = None
-        self.authenticate()
+        self._creds = creds
+        if creds is not None:
+            # Per-user mode: caller supplied already-built credentials.
+            self.service = build('gmail', 'v1', credentials=creds)
+            logger.info("Gmail service built from supplied credentials.")
+        else:
+            self.authenticate()
+
+    @classmethod
+    def from_token_json(cls, token_json: str) -> 'GmailClient':
+        """Build a client from a stored per-user OAuth token (JSON string).
+
+        Refreshes the access token if expired; read `token_json` afterwards to
+        persist any refresh back to the user's record.
+        """
+        info = json.loads(token_json)
+        creds = Credentials.from_authorized_user_info(info, SCOPES)
+        if not creds.valid and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        return cls(creds=creds)
+
+    @property
+    def token_json(self):
+        """Current credentials serialized to JSON (None if unavailable)."""
+        return self._creds.to_json() if self._creds is not None else None
 
     def authenticate(self):
         creds = None
@@ -33,7 +58,7 @@ class GmailClient:
                 if not os.path.exists(self.credentials_path):
                     logger.error(f"Credentials file not found at {self.credentials_path}")
                     raise FileNotFoundError(f"Please place your Google Cloud credentials file at {self.credentials_path}")
-                
+
                 flow = InstalledAppFlow.from_client_secrets_file(
                     self.credentials_path, SCOPES)
                 creds = flow.run_local_server(port=0)
@@ -41,6 +66,7 @@ class GmailClient:
             with open(self.token_path, 'w') as token:
                 token.write(creds.to_json())
 
+        self._creds = creds
         self.service = build('gmail', 'v1', credentials=creds)
         logger.info("Gmail service authenticated successfully.")
 

@@ -4,7 +4,7 @@ import os
 from sqlalchemy.orm import Session
 from src.gmail_client import GmailClient
 from src.database import get_db
-from src.models import ProcessedEmail
+from src.models import ProcessedEmail, User
 from src.config import BANK_CONFIG
 from src.ingest import ingest_transactions, load_fingerprints
 from src.tag_engine import TagEngine
@@ -17,7 +17,9 @@ class ExpenseProcessor:
     def __init__(self, manual=False, owner_email=None):
         self.manual = manual
         self.owner_email = owner_email
-        self.gmail_client = GmailClient()
+        # Built lazily: a per-user client in multi-user mode, or the global
+        # file-based client (secrets/token.json) in legacy single-account mode.
+        self.gmail_client = None
         self.parsers = {}
         self._load_parsers()
 
@@ -36,15 +38,40 @@ class ExpenseProcessor:
         db_gen = get_db()
         db = next(db_gen)
         try:
-            # All ingested data belongs to one owner (the configured Gmail
-            # account's user). Resolve once per cycle.
-            owner = resolve_owner(db, self.owner_email)
-            logger.info(f"Processing into account: {owner.email}")
-            for bank_id, config in BANK_CONFIG.items():
-                self._process_bank(bank_id, config, db, owner.id)
+            connected = db.query(User).filter(User.gmail_token.isnot(None)).all()
+            if connected:
+                # Multi-user mode: each connected user's Gmail → their account.
+                logger.info(f"Processing {len(connected)} connected Gmail account(s)")
+                for user in connected:
+                    self._process_user(db, user)
+            else:
+                # Legacy single-account mode (global secrets/token.json).
+                owner = resolve_owner(db, self.owner_email)
+                logger.info(f"Processing global Gmail into account: {owner.email}")
+                self.gmail_client = GmailClient()
+                for bank_id, config in BANK_CONFIG.items():
+                    self._process_bank(bank_id, config, db, owner.id)
         finally:
             next(db_gen, None) # Close the generator
         logger.info("Processing cycle finished.")
+
+    def _process_user(self, db: Session, user: User):
+        """Process one connected user's Gmail into their own account."""
+        try:
+            self.gmail_client = GmailClient.from_token_json(user.gmail_token)
+        except Exception as e:
+            logger.error(f"Could not build Gmail client for {user.email}: {e}")
+            return
+
+        logger.info(f"Processing Gmail for {user.email}")
+        for bank_id, config in BANK_CONFIG.items():
+            self._process_bank(bank_id, config, db, user.id)
+
+        # Persist a refreshed access token back to the user's record.
+        refreshed = self.gmail_client.token_json
+        if refreshed and refreshed != user.gmail_token:
+            user.gmail_token = refreshed
+            db.commit()
 
     def _process_bank(self, bank_id, config, db: Session, user_id: int):
         senders = config.get('senders', [])

@@ -10,7 +10,7 @@ import os
 from datetime import datetime, timedelta
 from functools import wraps
 
-from flask import Flask, jsonify, request, send_from_directory, render_template, redirect, url_for, Response
+from flask import Flask, jsonify, request, send_from_directory, render_template, redirect, url_for, session, Response
 from flask_login import LoginManager, current_user
 from werkzeug.middleware.proxy_fix import ProxyFix
 from sqlalchemy import func, extract
@@ -22,6 +22,7 @@ from src.models import Expense, Tag, TagRule, ExpenseTag, User
 from src.tag_engine import TagEngine
 from src.auth import auth_bp
 from src.extensions import csrf, limiter
+from src import gmail_oauth
 
 logger = logging.getLogger(__name__)
 
@@ -840,4 +841,56 @@ def api_cards(db: Session):
         }
         for c in cards
     ])
+
+
+# ── Gmail connection (per-user OAuth) ─────────────────────────────────────────
+
+@app.route('/api/gmail/status')
+@with_db
+def api_gmail_status(db: Session):
+    user = db.get(User, current_user.id)
+    return jsonify({
+        'connected': bool(user and user.gmail_token),
+        'available': gmail_oauth.credentials_available(),
+    })
+
+
+@app.route('/gmail/connect')
+def gmail_connect():
+    if not gmail_oauth.credentials_available():
+        return redirect(url_for('index'))
+    redirect_uri = url_for('gmail_callback', _external=True)
+    flow = gmail_oauth.build_flow(redirect_uri)
+    auth_url, state = flow.authorization_url(
+        access_type='offline', include_granted_scopes='true', prompt='consent'
+    )
+    session['gmail_oauth_state'] = state
+    return redirect(auth_url)
+
+
+@app.route('/gmail/callback')
+@with_db
+def gmail_callback(db: Session):
+    state = session.pop('gmail_oauth_state', None)
+    redirect_uri = url_for('gmail_callback', _external=True)
+    try:
+        flow = gmail_oauth.build_flow(redirect_uri, state=state)
+        flow.fetch_token(authorization_response=request.url)
+        user = db.get(User, current_user.id)
+        user.gmail_token = flow.credentials.to_json()
+        db.commit()
+        logger.info(f"Gmail connected for user {user.email}")
+    except Exception as e:
+        logger.error(f"Gmail OAuth callback failed: {e}", exc_info=True)
+    return redirect(url_for('index'))
+
+
+@app.route('/gmail/disconnect', methods=['POST'])
+@with_db
+def gmail_disconnect(db: Session):
+    user = db.get(User, current_user.id)
+    if user:
+        user.gmail_token = None
+        db.commit()
+    return jsonify({'ok': True})
 

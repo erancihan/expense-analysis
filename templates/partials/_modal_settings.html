@@ -23,6 +23,24 @@
                         </div>
                         <p class="mt-2 text-xs text-slate-500">The day your credit card statement is generated. Used to calculate the active monthly window.</p>
                     </div>
+
+                    <!-- Gmail connection (shown only when an OAuth client is configured) -->
+                    <div x-show="gmailAvailable" class="border-t border-slate-700/50 pt-6">
+                        <label class="block text-sm font-medium text-slate-300 mb-2">Gmail Connection</label>
+                        <div class="flex items-center justify-between gap-3">
+                            <span x-show="gmailConnected" class="inline-flex items-center gap-1.5 text-sm text-emerald-400">
+                                <span class="w-2 h-2 rounded-full bg-emerald-400"></span> Connected
+                            </span>
+                            <span x-show="!gmailConnected" class="inline-flex items-center gap-1.5 text-sm text-slate-500">
+                                <span class="w-2 h-2 rounded-full bg-slate-600"></span> Not connected
+                            </span>
+                            <a x-show="!gmailConnected" href="/gmail/connect"
+                               class="px-3 py-1.5 text-sm bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors">Connect Gmail</a>
+                            <button x-show="gmailConnected" @click="disconnectGmail()"
+                                    class="px-3 py-1.5 text-sm bg-slate-700 hover:bg-red-600 text-slate-200 rounded-lg transition-colors">Disconnect</button>
+                        </div>
+                        <p class="mt-2 text-xs text-slate-500">Connect your Gmail so statements import automatically into your account.</p>
+                    </div>
                 </div>
             </div>
             <div class="mt-8 flex justify-end">

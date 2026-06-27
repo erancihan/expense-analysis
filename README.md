@@ -141,6 +141,28 @@ Checklist before exposing it:
 > built stylesheet and using Alpine's CSP build would allow a strict policy
 > (tracked in `ROADMAP.md`).
 
+### Per-user Gmail (optional, for hosted multi-user)
+
+Each user can connect their own Gmail from **Settings → Connect Gmail**; the
+scheduled processor (`make process`) then imports each connected user's
+statements into their own account. If no user has connected, the processor
+falls back to the legacy single-account mode (global `secrets/token.json`),
+attributing data to the admin.
+
+To enable the in-app connect flow, create a **Web application** OAuth client
+(not "Desktop") in Google Cloud:
+
+1. Google Cloud Console → APIs & Services → Credentials → Create OAuth client ID
+   → *Web application*.
+2. Add an authorized redirect URI: `https://YOUR_DOMAIN/gmail/callback`.
+3. Download the JSON to `secrets/credentials.json`.
+4. Enable the Gmail API for the project; add your users as test users (or
+   publish the consent screen). Scope used: `gmail.readonly`.
+
+The Connect button is hidden until `secrets/credentials.json` exists. Tokens are
+stored per-user in the database — restrict DB access accordingly (encrypting the
+`gmail_token` column at rest is a reasonable follow-up).
+
 ### Returning Use
 
 ```bash

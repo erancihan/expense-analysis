@@ -23,10 +23,18 @@ class User(Base, UserMixin):
     # NOTE: shadows UserMixin.is_active (a property) with a real column so
     # Flask-Login reads the stored flag. Disabled users can't authenticate.
     is_active = Column(Boolean, default=True, nullable=False)
+    # Per-user Gmail OAuth token (JSON from the web consent flow). Null = not
+    # connected. The Gmail processor ingests each connected user's statements
+    # into their own account.
+    gmail_token = Column(Text, nullable=True)
     created_at = Column(DateTime, default=utc_now)
 
     def __repr__(self):
         return f"<User(email='{self.email}')>"
+
+    @property
+    def gmail_connected(self) -> bool:
+        return bool(self.gmail_token)
 
 
 class Expense(Base):

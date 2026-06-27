@@ -7,6 +7,7 @@ isolated temp DB *before* importing any src.* module.
 import os
 import tempfile
 import unittest
+from unittest.mock import patch, MagicMock
 
 # Must run before importing src.* so src.config picks these up.
 _TMPDIR = tempfile.mkdtemp()
@@ -267,6 +268,66 @@ class SecurityHardeningTestCase(unittest.TestCase):
         self.assertEqual(r.headers.get('X-Content-Type-Options'), 'nosniff')
         self.assertEqual(r.headers.get('X-Frame-Options'), 'DENY')
         self.assertIn('Content-Security-Policy', r.headers)
+
+
+class GmailWebTestCase(unittest.TestCase):
+    """Per-user Gmail connect/callback/disconnect/status routes."""
+
+    @classmethod
+    def setUpClass(cls):
+        Base.metadata.create_all(engine)
+
+    def setUp(self):
+        db = SessionLocal()
+        try:
+            db.query(User).delete()
+            db.add(User(email='owner@example.com',
+                        password_hash=generate_password_hash('pw'), is_active=True))
+            db.commit()
+        finally:
+            db.close()
+        self.client = app.test_client()
+        self.client.post('/login', data={'email': 'owner@example.com', 'password': 'pw'})
+
+    def _set_token(self, tok):
+        db = SessionLocal()
+        try:
+            db.query(User).filter_by(email='owner@example.com').first().gmail_token = tok
+            db.commit()
+        finally:
+            db.close()
+
+    def _token(self):
+        db = SessionLocal()
+        try:
+            return db.query(User).filter_by(email='owner@example.com').first().gmail_token
+        finally:
+            db.close()
+
+    def test_status_reflects_connection(self):
+        self.assertFalse(self.client.get('/api/gmail/status').get_json()['connected'])
+        self._set_token('{"t":"x"}')
+        self.assertTrue(self.client.get('/api/gmail/status').get_json()['connected'])
+
+    def test_disconnect_clears_token(self):
+        self._set_token('{"t":"x"}')
+        self.client.post('/gmail/disconnect')
+        self.assertIsNone(self._token())
+
+    @patch('src.web.gmail_oauth.credentials_available', return_value=False)
+    def test_connect_without_credentials_redirects_home(self, _mock):
+        r = self.client.get('/gmail/connect')
+        self.assertEqual(r.status_code, 302)
+        self.assertTrue(r.headers['Location'].endswith('/'))
+
+    @patch('src.web.gmail_oauth.build_flow')
+    def test_callback_stores_token(self, mock_build_flow):
+        flow = MagicMock()
+        flow.credentials.to_json.return_value = '{"t":"fresh"}'
+        mock_build_flow.return_value = flow
+        r = self.client.get('/gmail/callback?code=abc&state=xyz')
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(self._token(), '{"t":"fresh"}')
 
 
 if __name__ == '__main__':
