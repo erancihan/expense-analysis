@@ -124,10 +124,13 @@ signup) · invite/admin-only registration.
 - [ ] *Nice-to-have:* full `extract_transactions` integration test (needs a checked-in
       sample PDF fixture).
 
-## Phase 4 — Features
+## Phase 4 — Features *(in progress)*
 
-- [ ] **Open product question (from old `plan.txt`):** should the summary charts align to
-      the custom statement period (cutoff day) instead of raw calendar month? Currently
-      grouped by `statement_period` (the PDF's billing cycle).
-- [ ] CSV/Excel export, budgets/alerts, cross-currency totals, additional bank parsers
-      (`BANK_CONFIG` already supports the plug-in shape).
+- [x] **CSV export** — `GET /api/expenses/export.csv` (per-user, respects the current
+      from/to/card/tag/search filters via the shared `_filtered_user_expenses` helper) +
+      an Export button. Formula-injection-safe text fields.
+- [ ] Budgets/alerts, cross-currency totals, additional bank parsers (`BANK_CONFIG`
+      already supports the plug-in shape).
+- [ ] Strict nonce-based CSP via vendored Tailwind + Alpine CSP build (2b follow-up).
+- [x] **Resolved:** the old `plan.txt` chart-period question — charts already group by
+      `statement_period` (the PDF's billing cycle), which is the desired behaviour.

@@ -179,37 +179,28 @@ def parse_date_filter(date_str: str, is_end: bool = False):
 
 # ── API: Expenses ────────────────────────────────────────────────────────────
 
-@app.route('/api/expenses')
-@with_db
-def api_expenses(db: Session):
-    # Pagination
-    page = max(1, request.args.get('page', 1, type=int))
-    per_page = min(200, max(1, request.args.get('per_page', 50, type=int)))
-
-    # Build query (scoped to the current user)
+def _filtered_user_expenses(db: Session):
+    """Current user's expenses with from/to/card/tag/search filters applied,
+    newest first. Shared by the list and CSV-export endpoints so they can't drift.
+    """
     query = (
         db.query(Expense)
         .filter(Expense.user_id == current_user.id)
         .order_by(Expense.date.desc(), Expense.id.desc())
     )
 
-    # Date range filter
-    date_from = request.args.get('from')
-    date_to = request.args.get('to')
-    dt_from = parse_date_filter(date_from, is_end=False)
+    dt_from = parse_date_filter(request.args.get('from'), is_end=False)
     if dt_from:
         query = query.filter(Expense.date >= dt_from)
 
-    dt_to = parse_date_filter(date_to, is_end=True)
+    dt_to = parse_date_filter(request.args.get('to'), is_end=True)
     if dt_to:
         query = query.filter(Expense.date < dt_to)
 
-    # Card filter
     card_filter = request.args.get('card')
     if card_filter:
         query = query.filter(Expense.card_number == card_filter)
 
-    # Tag filter
     tag_filter = request.args.get('tag')
     if tag_filter:
         tag = db.query(Tag).filter_by(name=tag_filter, user_id=current_user.id).first()
@@ -223,10 +214,21 @@ def api_expenses(db: Session):
             ]
             query = query.filter(Expense.id.in_(expense_ids)) if expense_ids else query.filter(False)
 
-    # Search
     search = request.args.get('search')
     if search and len(search) <= 200:
         query = query.filter(Expense.description.ilike(f'%{search}%'))
+
+    return query
+
+
+@app.route('/api/expenses')
+@with_db
+def api_expenses(db: Session):
+    # Pagination
+    page = max(1, request.args.get('page', 1, type=int))
+    per_page = min(200, max(1, request.args.get('per_page', 50, type=int)))
+
+    query = _filtered_user_expenses(db)
 
     # Count and paginate
     total = query.count()
@@ -262,6 +264,60 @@ def api_expenses(db: Session):
         'total': total,
         'total_pages': total_pages,
     })
+
+
+# ── API: CSV export ──────────────────────────────────────────────────────────
+
+def _csv_safe(value: str) -> str:
+    """Neutralise spreadsheet formula injection in text fields."""
+    s = '' if value is None else str(value)
+    if s and s[0] in ('=', '+', '-', '@', '\t', '\r'):
+        return "'" + s
+    return s
+
+
+@app.route('/api/expenses/export.csv')
+@with_db
+def api_export_csv(db: Session):
+    """Download the current user's expenses (respecting filters) as CSV."""
+    import csv
+    import io
+
+    expenses = _filtered_user_expenses(db).all()
+
+    # Preload tag names per expense in one query (avoid N+1).
+    tags_by_expense = {}
+    expense_ids = [e.id for e in expenses]
+    if expense_ids:
+        rows = (
+            db.query(ExpenseTag.expense_id, Tag.name)
+            .join(Tag, Tag.id == ExpenseTag.tag_id)
+            .filter(ExpenseTag.expense_id.in_(expense_ids))
+            .filter(ExpenseTag.source != 'suppressed')
+            .all()
+        )
+        for expense_id, name in rows:
+            tags_by_expense.setdefault(expense_id, []).append(name)
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['date', 'description', 'amount', 'currency', 'card', 'tags'])
+    for exp in expenses:
+        masked = f"****{exp.card_number[-4:]}" if exp.card_number and len(exp.card_number) >= 4 else (exp.card_number or '')
+        writer.writerow([
+            exp.date.strftime('%Y-%m-%d'),
+            _csv_safe(exp.description),
+            f"{exp.amount:.2f}",                      # numeric — keep sign, don't prefix
+            exp.currency or 'TRY',
+            masked,
+            _csv_safe(';'.join(sorted(tags_by_expense.get(exp.id, [])))),
+        ])
+
+    return Response(
+        output.getvalue(),
+        mimetype='text/csv',
+        headers={'Content-Disposition': 'attachment; filename=expenses.csv'},
+    )
 
 
 # ── API: Monthly Summary ────────────────────────────────────────────────────

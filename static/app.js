@@ -248,6 +248,17 @@ function app() {
             this.fetchSummary();
         },
 
+        exportCsv() {
+            // GET download (session cookie carries auth); mirrors the table filters.
+            const params = new URLSearchParams();
+            if (this.actualDateFrom) params.set('from', this.actualDateFrom);
+            if (this.actualDateTo) params.set('to', this.actualDateTo);
+            if (this.filterTag) params.set('tag', this.filterTag);
+            if (this.filterCard) params.set('card', this.filterCard);
+            if (this.searchQuery) params.set('search', this.searchQuery);
+            window.location.href = '/api/expenses/export.csv?' + params.toString();
+        },
+
         nextPage() {
             if (this.page < this.totalPages) {
                 this.page++;

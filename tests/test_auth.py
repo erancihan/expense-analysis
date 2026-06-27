@@ -197,6 +197,30 @@ class IsolationTestCase(unittest.TestCase):
         r = self.client.post('/api/tags', json={'name': 'b_only'})
         self.assertIn(r.status_code, (200, 201))
 
+    def test_csv_export_is_scoped(self):
+        self._login('a@example.com')
+        r = self.client.get('/api/expenses/export.csv')
+        self.assertEqual(r.status_code, 200)
+        self.assertIn('text/csv', r.headers['Content-Type'])
+        self.assertIn('attachment', r.headers['Content-Disposition'])
+        body = r.get_data(as_text=True)
+        self.assertIn('A COFFEE', body)
+        self.assertNotIn('B GROCERIES', body)  # B's data must not leak
+
+    def test_csv_export_neutralises_formula_injection(self):
+        db = SessionLocal()
+        try:
+            db.add(Expense(user_id=self.a, date=datetime(2026, 4, 8),
+                           description='=SUM(A1:A9)', amount=5, currency='TRY',
+                           bank_source='isbank', statement_period='2026-04'))
+            db.commit()
+        finally:
+            db.close()
+        self._login('a@example.com')
+        body = self.client.get('/api/expenses/export.csv').get_data(as_text=True)
+        self.assertIn("'=SUM(A1:A9)", body)   # leading quote disarms the formula
+        self.assertNotIn(',=SUM(A1:A9)', body)
+
 
 class SecurityHardeningTestCase(unittest.TestCase):
     """CSRF, rate limiting and security headers (Phase 2b)."""
