@@ -110,11 +110,19 @@ signup) · invite/admin-only registration.
 - **Default tags:** per-user, seeded on signup → `Tag`/`TagRule` get a `user_id` in 2a-ii.
 - **Registration:** invite/admin-only; initial admin via `scripts/create_user.py`.
 
-## Phase 3 — Tests & CI
+## Phase 3 — Tests & CI *(in progress)*
 
-- [ ] Unit tests for the İşbank parser (text/PDF fixtures — highest-value, least-tested
-      code), tag engine, and API endpoints (with auth).
-- [ ] CI workflow + `SessionStart` hook running tests/lint on web sessions and PRs.
+- [x] Unit tests for the İşbank parser pure functions (Turkish number normalisation,
+      amount/date patterns, card-metadata extraction, position matching).
+- [x] Tag-engine tests (match types, priority, user-rule override, suppression, and
+      per-user scoping/isolation).
+- [x] API/auth tests with isolation + CSRF/rate-limit (in `test_auth.py`).
+- [x] CI workflow (`.github/workflows/expense-analysis-tests.yml`) — runs the suite and a
+      fresh-DB migration check on every push/PR touching the project. **59 tests.**
+- [ ] *Optional:* `SessionStart` hook to auto-create the venv for Claude-on-web sessions
+      (repo-wide config; available via the `session-start-hook` skill on request).
+- [ ] *Nice-to-have:* full `extract_transactions` integration test (needs a checked-in
+      sample PDF fixture).
 
 ## Phase 4 — Features
 
