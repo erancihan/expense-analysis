@@ -1,4 +1,5 @@
 import os
+import json
 import yaml
 import logging
 from dotenv import load_dotenv
@@ -34,6 +35,13 @@ TRUSTED_PROXIES = int(os.getenv('TRUSTED_PROXIES', 0))
 # Rate limit applied to the login endpoint (brute-force defense).
 LOGIN_RATELIMIT = os.getenv('LOGIN_RATELIMIT', '10 per minute')
 
+# Exchange rates to TRY for cross-currency totals, e.g. {"USD": 34.0, "EUR": 37.0}.
+# Empty by default → foreign amounts aren't converted. TRY is always 1.0.
+try:
+    EXCHANGE_RATES = {k: float(v) for k, v in json.loads(os.getenv('EXCHANGE_RATES', '{}')).items()}
+except (ValueError, TypeError, AttributeError):
+    EXCHANGE_RATES = {}
+
 # Bank Configuration
 BANK_CONFIG = {
     'isbank': {
@@ -55,7 +63,7 @@ def _load_local_config():
     global DATABASE_URL, GMAIL_CREDENTIALS_PATH, GMAIL_TOKEN_PATH
     global CHECK_INTERVAL_MINUTES, BANK_CONFIG
     global SECRET_KEY, SESSION_COOKIE_SECURE, ALLOW_REGISTRATION
-    global TRUSTED_PROXIES, LOGIN_RATELIMIT
+    global TRUSTED_PROXIES, LOGIN_RATELIMIT, EXCHANGE_RATES
 
     if not os.path.exists(LOCAL_CONFIG_PATH):
         return
@@ -84,6 +92,8 @@ def _load_local_config():
         TRUSTED_PROXIES = int(local['trusted_proxies'])
     if 'login_ratelimit' in local:
         LOGIN_RATELIMIT = local['login_ratelimit']
+    if 'exchange_rates' in local:
+        EXCHANGE_RATES = {k: float(v) for k, v in (local['exchange_rates'] or {}).items()}
 
 _load_local_config()
 

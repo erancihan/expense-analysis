@@ -141,8 +141,13 @@ signup) · invite/admin-only registration.
 - [x] **Budgets** — `Budget` model (+ migration) for per-tag and overall monthly limits;
       CRUD API (`/api/budgets`, per-user scoped, upsert) + a dashboard card showing
       spent/limit progress for the selected statement period (green/amber/red).
-- [ ] Cross-currency totals, additional bank parsers (`BANK_CONFIG` already supports the
-      plug-in shape).
+- [x] **Cross-currency totals** — configurable `exchange_rates` (TRY-equivalent); the
+      monthly summary returns `converted_total` per period (TRY at 1.0 + foreign at its
+      rate; unrated currencies excluded), surfaced as an "≈ ₺ incl. FX" sub-stat.
+- [ ] Additional bank parsers — needs a sample statement from another bank (`BANK_CONFIG`
+      already supports the plug-in shape).
+- [ ] Strict nonce-based CSP (2b follow-up) — deferred: needs vendored Tailwind + Alpine
+      CSP build (large/risky frontend refactor).
 - [ ] Strict nonce-based CSP via vendored Tailwind + Alpine CSP build (2b follow-up).
 - [x] **Resolved:** the old `plan.txt` chart-period question — charts already group by
       `statement_period` (the PDF's billing cycle), which is the desired behaviour.

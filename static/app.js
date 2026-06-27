@@ -40,6 +40,7 @@ function app() {
         chartRange: localStorage.getItem('chartRange') || '1y',
         selectedPeriodData: null,
         totalSpent: 0,
+        totalConverted: 0,
         totalCount: 0,
         avgMonthly: 0,
         totalPayments: 0,
@@ -532,6 +533,7 @@ function app() {
         // ── Computed stats ────────────────────────────────────────
         computeStats() {
             this.totalSpent = this.chartData.reduce((sum, m) => sum + m.total, 0);
+            this.totalConverted = this.chartData.reduce((sum, m) => sum + (m.converted_total ?? m.total), 0);
             this.totalCount = this.chartData.reduce((sum, m) => sum + m.count, 0);
             this.avgMonthly = this.chartData.length > 0 ? this.totalSpent / this.chartData.length : 0;
             this.totalPayments = 0;

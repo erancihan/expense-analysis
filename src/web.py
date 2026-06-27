@@ -16,7 +16,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from sqlalchemy import func, extract
 from sqlalchemy.orm import Session
 
-from src.config import SECRET_KEY, SESSION_COOKIE_SECURE, TRUSTED_PROXIES
+from src.config import SECRET_KEY, SESSION_COOKIE_SECURE, TRUSTED_PROXIES, EXCHANGE_RATES
 from src.database import SessionLocal
 from src.models import Expense, Tag, TagRule, ExpenseTag, User, Budget
 from src.tag_engine import TagEngine
@@ -442,11 +442,19 @@ def api_summary_monthly(db: Session):
                 'count': data['count'],
             })
         m = monthly.get(period, {'total': 0.0, 'count': 0})
+        # TRY-equivalent grand total: TRY at 1.0 + each foreign currency at its
+        # configured rate (currencies without a rate are left out).
+        converted_total = 0.0
+        for cur, data in by_currency.items():
+            rate = 1.0 if cur == 'TRY' else EXCHANGE_RATES.get(cur)
+            if rate is not None:
+                converted_total += data['total'] * rate
         result.append({
             'year': year,
             'month': month,
             'label': period,
             'total': round(m['total'], 2),
+            'converted_total': round(converted_total, 2),
             'count': m['count'],
             'by_tag': by_tag,
             'by_currency': by_currency,

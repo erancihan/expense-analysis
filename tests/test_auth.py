@@ -329,6 +329,47 @@ class BudgetTestCase(unittest.TestCase):
         self.assertEqual(self.client.delete(f'/api/budgets/{bid}').status_code, 404)
 
 
+class CrossCurrencyTestCase(unittest.TestCase):
+    """Cross-currency TRY-equivalent totals in the monthly summary."""
+
+    @classmethod
+    def setUpClass(cls):
+        Base.metadata.create_all(engine)
+
+    def setUp(self):
+        db = SessionLocal()
+        try:
+            for m in (Expense, User):
+                db.query(m).delete()
+            db.commit()
+            u = User(email='fx@x', password_hash=generate_password_hash('pw'), is_active=True)
+            db.add(u); db.commit()
+            for desc, amount, cur in [('TRY BUY', 100.0, 'TRY'), ('USD BUY', 10.0, 'USD')]:
+                db.add(Expense(user_id=u.id, date=datetime(2026, 4, 7), description=desc,
+                               amount=amount, currency=cur, bank_source='isbank',
+                               statement_period='2026-04', category='Uncategorized'))
+            db.commit()
+        finally:
+            db.close()
+        self.client = app.test_client()
+        self.client.post('/login', data={'email': 'fx@x', 'password': 'pw'})
+
+    def _period(self):
+        data = self.client.get('/api/summary/monthly').get_json()
+        return next(p for p in data if p['label'] == '2026-04')
+
+    def test_no_rates_excludes_foreign(self):
+        with patch('src.web.EXCHANGE_RATES', {}):
+            p = self._period()
+        self.assertEqual(p['total'], 100.0)            # TRY-only chart total
+        self.assertEqual(p['converted_total'], 100.0)  # USD left out (no rate)
+
+    def test_configured_rate_converts_foreign(self):
+        with patch('src.web.EXCHANGE_RATES', {'USD': 30.0}):
+            p = self._period()
+        self.assertEqual(p['converted_total'], 100.0 + 10.0 * 30.0)  # 400.0
+
+
 class GmailWebTestCase(unittest.TestCase):
     """Per-user Gmail connect/callback/disconnect/status routes."""
 

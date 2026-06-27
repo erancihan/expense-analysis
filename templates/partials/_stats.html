@@ -3,6 +3,10 @@
     <div class="glass-card rounded-xl p-4">
         <p class="text-xs text-slate-400 uppercase tracking-wider font-medium">Total Spent</p>
         <p class="text-2xl font-bold text-emerald-400 mt-1" x-text="formatCurrency(totalSpent)"></p>
+        <p x-show="Math.abs(totalConverted - totalSpent) > 1" style="display:none"
+           class="text-xs text-slate-500 mt-0.5" title="Includes foreign-currency spend converted at configured rates">
+            ≈ <span x-text="formatCurrency(totalConverted)"></span> incl. FX
+        </p>
     </div>
     <div class="glass-card rounded-xl p-4">
         <p class="text-xs text-slate-400 uppercase tracking-wider font-medium">Transactions</p>

@@ -19,6 +19,11 @@
 # trusted_proxies: 1
 # Rate limit on the login endpoint (brute-force defense).
 # login_ratelimit: "10 per minute"
+# Exchange rates to TRY for cross-currency totals. Foreign spend is converted in
+# the dashboard's TRY-equivalent total; currencies without a rate are left out.
+# exchange_rates:
+#   USD: 34.0
+#   EUR: 37.0
 
 # bank_config:
 #   isbank:
