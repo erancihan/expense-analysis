@@ -5,9 +5,14 @@ A personal expense tracker that parses İşbank credit card statement PDFs, cate
 ## Features
 
 - **PDF Parsing** — Extracts transactions from İşbank HTML-formatted PDF statements using positional layout analysis
-- **Gmail Integration** — Automatically downloads statement PDFs from email
+- **Gmail Integration** — Downloads statement PDFs from email, either from a single global account or per-user via in-app OAuth
 - **Auto-Tagging** — Rule-based categorization engine with priority-based pattern matching (contains, starts_with, regex)
 - **Web Dashboard** — Single-page app with ECharts graphs, filterable expense table, and tag management
+- **Multi-User** — Password accounts with fully isolated expenses, tags, rules and budgets per user
+- **Budgets** — Per-tag and overall monthly limits with spent/limit progress on the dashboard
+- **CSV Export** — Downloads the current filtered view; text fields are formula-injection-safe
+- **Cross-Currency Totals** — Configurable exchange rates produce a TRY-equivalent grand total alongside per-currency figures
+- **Security** — Fail-closed auth gate, CSRF protection, login rate limiting and security headers for internet-facing deployment
 - **Migration System** — Alembic-managed schema migrations with autogenerate support
 
 ## Project Structure
@@ -15,17 +20,24 @@ A personal expense tracker that parses İşbank credit card statement PDFs, cate
 ```
 expense-analysis/
 ├── src/                    # Library code (no executables)
-│   ├── models.py           # SQLAlchemy ORM models
-│   ├── database.py         # Engine & session factory
+│   ├── models.py           # SQLAlchemy ORM models (User, Expense, Tag, TagRule, Budget, …)
+│   ├── database.py         # Engine & session factory (DATABASE_URL from src.config)
 │   ├── web.py              # Flask app & REST API
+│   ├── auth.py             # Login/logout routes, auth gate helpers
+│   ├── extensions.py       # Unbound Flask extensions (CSRF, rate limiter)
+│   ├── users.py            # Owner resolution for CLI / ingestion entry points
+│   ├── seeding.py          # Per-user default tag & rule seeding
+│   ├── ingest.py           # Shared transaction ingestion (dedup, statement_period)
 │   ├── import_pdfs.py      # Bulk PDF import logic
-│   ├── tag_engine.py       # TagEngine class (rule matching)
-│   ├── gmail_client.py     # Gmail API client
-│   ├── processor.py        # Email processing pipeline
+│   ├── tag_engine.py       # TagEngine class (rule matching, per-user scoped)
+│   ├── gmail_client.py     # Gmail API client (global token or per-user token JSON)
+│   ├── gmail_oauth.py      # Web OAuth flow for connecting a user's Gmail
+│   ├── processor.py        # Email processing pipeline (iterates connected users)
 │   ├── config.py           # Application configuration
 │   └── parsers/
-│       ├── base.py         # Parser interface
-│       └── isbank.py       # İşbank statement parser
+│       ├── base.py         # Parser interface (BankParser)
+│       ├── isbank.py       # İşbank statement parser
+│       └── sample.py       # Stub showing the shape of a new bank parser
 │
 ├── scripts/                # Executable entry points
 │   ├── web.py              # Start the web server
@@ -34,6 +46,8 @@ expense-analysis/
 │   ├── retag.py            # Re-tag expenses / show stats
 │   ├── seed.py             # Seed tags & rules from YAML
 │   ├── add_tag.py          # CLI to add tags & rules
+│   ├── backup_tags.py      # Dump tags & rules back to YAML
+│   ├── create_user.py      # Create (or reset) an account
 │   ├── parse_pdf.py        # Debug-parse a single PDF
 │   └── process.py          # Gmail processor (scheduled)
 │
@@ -48,11 +62,17 @@ expense-analysis/
 │   ├── env.py              # Configured for our models
 │   └── versions/           # Migration scripts (datetime-prefixed)
 │
-├── static/
-│   └── index.html          # Web dashboard (Alpine.js, ECharts, TailwindCSS)
+├── templates/              # Jinja2 templates
+│   ├── index.html          # Dashboard shell (Alpine.js, ECharts, TailwindCSS)
+│   ├── login.html          # Login page
+│   └── partials/           # Header, stats, chart, expenses, budgets, modals
 │
-├── tests/                  # Test files
-├── secrets/                # Gmail OAuth credentials (gitignored)
+├── static/
+│   └── app.js              # Dashboard front-end logic (Alpine component)
+│
+├── tests/                  # unittest suite
+├── secrets/                # Gmail OAuth credentials & token (gitignored)
+├── .github/workflows/      # CI: runs the suite + a fresh-DB migration check
 ├── Makefile                # All available commands
 ├── requirements.txt
 ├── alembic.ini
@@ -133,8 +153,10 @@ Checklist before exposing it:
 1. Set a strong `secret_key` (`python -c "import secrets; print(secrets.token_hex(32))"`).
 2. Terminate TLS at the proxy; set `session_cookie_secure: true` and
    `trusted_proxies: 1` so client IP / HTTPS are read from `X-Forwarded-*`.
-3. Run under gunicorn, e.g. `gunicorn -w 2 'src.web:app'`. For more than one
-   worker, point the rate limiter at redis (in-memory state isn't shared).
+3. Run under a WSGI server — `requirements.txt` doesn't include one, so install
+   it yourself (`pip install gunicorn`) and serve with e.g.
+   `gunicorn -w 2 'src.web:app'`. For more than one worker, point the rate
+   limiter at redis; its default in-memory state isn't shared between workers.
 
 > Note: the CSP currently allows `'unsafe-inline'`/`'unsafe-eval'` because the
 > Tailwind Play CDN and Alpine.js evaluate at runtime. Vendoring Tailwind as a
@@ -195,6 +217,8 @@ make web
 | `make migrations-generate MSG="description"` | Auto-generate a migration from model changes |
 | `make migrations-status` | Show current migration state and history |
 | `make seed` | Seed tags & rules from `data/seeds/tags.yaml` |
+| `make backup-tags` | Dump tags & rules from the DB back to `data/seeds/tags.yaml` |
+| `make refresh-db` | Full rebuild: backup tags → reset DB → migrate → seed → download → import → retag |
 
 ### Import & Tagging
 
@@ -220,9 +244,21 @@ make add-tag NAME=cafe ICON=☕ COLOR='#78716c' RULES="STARBUCKS,KRONOTROP"
 
 | Command | Description |
 |---|---|
+| `make install` | Create the venv and install dependencies |
+| `make create-user EMAIL=you@example.com [ADMIN=1]` | Create (or reset) an account; prompts for a password |
 | `make parse-pdf PDF=path/to/file.pdf` | Debug-parse a single PDF |
-| `make test` | Run tests |
+| `make test` | Run the test suite |
 | `make clean` | Remove venv and cache files |
+
+## Tests
+
+```bash
+make test        # or: python -m unittest discover -s tests -v
+```
+
+CI (`.github/workflows/tests.yml`) runs the same suite on every push to `master`
+and on every pull request, plus a check that the migrations apply cleanly to an
+empty database. CI runs on Python 3.12.
 
 ## Tag System
 
@@ -256,31 +292,79 @@ rules:
 
 - **auto** — Applied automatically by the tag engine based on rules
 - **manual** — Set by the user through the web UI (preserved during re-tagging)
+- **suppressed** — Removed by the user; the link is kept so re-tagging won't put
+  the tag back, and it's excluded from tag filters and totals
 
 ## API Endpoints
 
+All `/api/*` routes require a logged-in session and only ever see the current
+user's data. Mutating requests need a CSRF token.
+
+### Expenses
+
 | Method | Endpoint | Description |
 |---|---|---|
-| GET | `/api/expenses` | Paginated expenses with filters |
-| GET | `/api/summary/monthly` | Monthly spending aggregation by tag |
+| GET | `/api/expenses` | Paginated expenses with filters (card numbers masked to last 4) |
+| GET | `/api/expenses/export.csv` | Download the filtered expenses as CSV |
+| GET | `/api/summary/monthly` | Spending aggregated by statement period, with per-tag/currency/card breakdowns |
+| GET | `/api/cards` | List cards with expense counts |
+| GET | `/api/expenses/:id/details` | Expense detail, including which rules produced its auto-tags |
+
+### Tags & rules
+
+| Method | Endpoint | Description |
+|---|---|---|
 | GET | `/api/tags` | All tags |
-| POST | `/api/tags` | Create/update a tag |
-| DELETE | `/api/tags/:id` | Delete a non-default tag |
+| POST | `/api/tags` | Create a tag, or update the color/icon of one with that name |
+| PUT | `/api/tags/:id` | Rename or restyle a tag |
+| DELETE | `/api/tags/:id` | Delete a tag |
+| POST | `/api/tags/:id/merge` | Merge a tag into `target_tag_id` |
 | GET | `/api/tag-rules` | All tag rules |
 | POST | `/api/tag-rules` | Create a tag rule |
-| DELETE | `/api/tag-rules/:id` | Delete a non-default rule |
-| POST | `/api/expenses/:id/tags` | Manually set tags on an expense |
+| DELETE | `/api/tag-rules/:id` | Delete a tag rule |
 | POST | `/api/retag` | Re-tag all expenses |
-| GET | `/api/cards` | List cards with expense counts |
 
-### Query Parameters (GET /api/expenses)
+Tags and rules carry an `is_default` flag marking the ones seeded on signup. It
+is reported in the API but not enforced — a default tag or rule can be deleted
+like any other.
+
+### Tags on an expense
+
+| Method | Endpoint | Description |
+|---|---|---|
+| POST | `/api/expenses/:id/tags` | Manually set tags on an expense |
+| DELETE | `/api/expenses/:id/tags/:tag_id` | Suppress a tag so re-tagging won't re-apply it |
+| POST | `/api/expenses/:id/tags/:tag_id/restore` | Restore a suppressed tag as manual |
+| DELETE | `/api/expenses/:id/tags/:tag_id/hard` | Permanently remove the tag link |
+
+### Budgets
+
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/budgets` | List budgets (the overall budget first) |
+| POST | `/api/budgets` | Upsert a budget — `{tag_id, amount}`; `tag_id: null` means overall |
+| DELETE | `/api/budgets/:id` | Delete a budget |
+
+### Gmail connection
+
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/gmail/status` | Whether this user is connected, and whether OAuth is configured at all |
+| GET | `/gmail/connect` | Redirect into Google's consent screen |
+| GET | `/gmail/callback` | OAuth redirect target; stores the token |
+| POST | `/gmail/disconnect` | Clear this user's stored token |
+
+### Query Parameters (GET /api/expenses and /api/expenses/export.csv)
 
 | Param | Description |
 |---|---|
-| `page` | Page number (default: 1) |
-| `per_page` | Items per page (default: 50, max: 200) |
-| `from` | Start month filter (YYYY-MM) |
-| `to` | End month filter (YYYY-MM) |
-| `tag` | Filter by tag name |
-| `card` | Filter by card number |
-| `search` | Search in descriptions |
+| `page` | Page number (default: 1) — list endpoint only |
+| `per_page` | Items per page (default: 50, max: 200) — list endpoint only |
+| `from` | Start date filter, `YYYY-MM` or `YYYY-MM-DD` (inclusive) |
+| `to` | End date filter, `YYYY-MM` or `YYYY-MM-DD` (inclusive) |
+| `tag` | Filter by tag name (suppressed tags don't count as a match) |
+| `card` | Filter by full card number |
+| `search` | Substring search in descriptions (max 200 chars) |
+
+`GET /api/summary/monthly` takes its own `from`/`to`, which filter **statement
+periods** (`YYYY-MM`) rather than transaction dates.
