@@ -18,8 +18,8 @@ each user has isolated expenses and connects their own Gmail.
 - [x] **Phase 1 — Stabilize the WIP** *(done 2026-06-26)*
 - [x] **Phase 0 — Hygiene** *(done 2026-06-26)*
 - [x] **Phase 2 — Full multi-user + security** *(2a auth+isolation, 2b hardening, 2c per-user Gmail — all done)*
-- [~] **Phase 3 — Tests & CI** *(parser/tag-engine/auth tests + CI done; optional SessionStart hook + PDF-fixture test remain)*
-- [~] **Phase 4 — Features** *(CSV export done; budgets/cross-currency/strict-CSP remain)*
+- [~] **Phase 3 — Tests & CI** *(parser/tag-engine/auth tests done; CI workflow added 2026-08-05; PDF-fixture test remains)*
+- [~] **Phase 4 — Features** *(CSV export, budgets, cross-currency done; strict-CSP + extra bank parsers remain)*
 
 ---
 
@@ -34,11 +34,6 @@ each user has isolated expenses and connects their own Gmail.
 - [ ] **Follow-up (needs decision):** `raw_pdf.txt` held a real name + home address and
       remains in git history. A history scrub (e.g. `git filter-repo`) would remove it
       but rewrites hashes — do only if this repo is/will be public.
-
-> Note: the `.githooks/`, `.github/workflows/update-submodules.yml` and `tmux-wsl-info`
-> files that appear "deleted" in `git diff master..feat/expense-analysis-user-login` were
-> **never deleted** by this work — the feature branch was simply cut from `master` before
-> those commits landed. They return automatically when this work merges to `master`.
 
 ## Phase 1 — Stabilize the WIP ✅
 
@@ -126,10 +121,11 @@ signup) · invite/admin-only registration.
 - [x] Tag-engine tests (match types, priority, user-rule override, suppression, and
       per-user scoping/isolation).
 - [x] API/auth tests with isolation + CSRF/rate-limit (in `test_auth.py`).
-- [x] CI workflow (`.github/workflows/expense-analysis-tests.yml`) — runs the suite and a
-      fresh-DB migration check on every push/PR touching the project. **59 tests.**
-- [ ] *Optional:* `SessionStart` hook to auto-create the venv for Claude-on-web sessions
-      (repo-wide config; available via the `session-start-hook` skill on request).
+- [x] CI workflow (`.github/workflows/tests.yml`) — runs the suite and a fresh-DB migration
+      check on every push and PR. **76 tests.** *(Added 2026-08-05. A previous revision of
+      this file marked CI as done while no workflow existed in either repo.)*
+- [—] *Optional:* `SessionStart` hook to auto-create the venv for Claude-on-web sessions —
+      **not pursued**: development happens in a local terminal, where the hook is inert.
 - [ ] *Nice-to-have:* full `extract_transactions` integration test (needs a checked-in
       sample PDF fixture).
 
@@ -148,6 +144,5 @@ signup) · invite/admin-only registration.
       already supports the plug-in shape).
 - [ ] Strict nonce-based CSP (2b follow-up) — deferred: needs vendored Tailwind + Alpine
       CSP build (large/risky frontend refactor).
-- [ ] Strict nonce-based CSP via vendored Tailwind + Alpine CSP build (2b follow-up).
 - [x] **Resolved:** the old `plan.txt` chart-period question — charts already group by
       `statement_period` (the PDF's billing cycle), which is the desired behaviour.

@@ -1,0 +1,35 @@
+name: tests
+
+# Standalone repo: every push and PR runs the suite. (While this project lived
+# inside erancihan/erancihan it had no CI of its own; nothing ran it.)
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Check migrations apply to a fresh database
+        env:
+          DATABASE_URL: sqlite:///ci_check.db
+          SECRET_KEY: ci-secret
+        run: alembic upgrade head
