@@ -18,8 +18,9 @@ each user has isolated expenses and connects their own Gmail.
 - [x] **Phase 1 — Stabilize the WIP** *(done 2026-06-26)*
 - [x] **Phase 0 — Hygiene** *(done 2026-06-26)*
 - [x] **Phase 2 — Full multi-user + security** *(2a auth+isolation, 2b hardening, 2c per-user Gmail — all done)*
-- [~] **Phase 3 — Tests & CI** *(parser/tag-engine/auth tests done; CI workflow added 2026-08-05; PDF-fixture test remains)*
+- [~] **Phase 3 — Tests & CI** *(parser/tag-engine/auth tests done; CI green on GitHub since 2026-08-05; PDF-fixture test remains)*
 - [~] **Phase 4 — Features** *(CSV export, budgets, cross-currency done; strict-CSP + extra bank parsers remain)*
+- [~] **Phase 5 — Docs accuracy** *(README synced to code 2026-08-05; ROADMAP audit ongoing)*
 
 ---
 
@@ -31,9 +32,15 @@ each user has isolated expenses and connects their own Gmail.
       (debug dump — **contained PII**), `test_isbank.py` (debug runner, superseded by
       `scripts/parse_pdf.py`).
 - [x] Consolidate `HANDOVER.md` + `plan.txt` into this file.
-- [ ] **Follow-up (needs decision):** `raw_pdf.txt` held a real name + home address and
-      remains in git history. A history scrub (e.g. `git filter-repo`) would remove it
-      but rewrites hashes — do only if this repo is/will be public.
+- [—] **Follow-up — closed, risk accepted (2026-08-05).** `raw_pdf.txt` held a real name +
+      home address. Two corrections to what an earlier revision of this file claimed:
+      it is **not** in this repo's history (verified: `git log --all -- '*raw_pdf*'` is
+      empty), and the repo it *is* in — the former parent, `erancihan/erancihan`, at
+      `playground/python/expense-analysis/raw_pdf.txt` (added `bd8a3f7`, in-tree copy
+      removed `5e2cd51`) — is already **public**, so the old "do only if this repo is/will
+      be public" condition had silently been met. A `git filter-repo` scrub of the parent
+      would rewrite every later hash and break its submodule pointers; the exposure was
+      knowingly accepted instead. Not an open task — do not re-open it as one.
 
 ## Phase 1 — Stabilize the WIP ✅
 
@@ -122,8 +129,12 @@ signup) · invite/admin-only registration.
       per-user scoping/isolation).
 - [x] API/auth tests with isolation + CSRF/rate-limit (in `test_auth.py`).
 - [x] CI workflow (`.github/workflows/tests.yml`) — runs the suite and a fresh-DB migration
-      check on every push and PR. **76 tests.** *(Added 2026-08-05. A previous revision of
-      this file marked CI as done while no workflow existed in either repo.)*
+      check on every push to `master` and every PR. **76 tests.** *(Added 2026-08-05. A
+      previous revision of this file marked CI as done while no workflow existed in either
+      repo — and even once the file existed it had never executed, because the branch
+      carrying it was pushed without a PR. First green runs: PR #1 and the `master` push
+      that merged it, both 2026-08-05. Verified with `gh run list --workflow=tests`, not
+      by the file's presence.)*
 - [—] *Optional:* `SessionStart` hook to auto-create the venv for Claude-on-web sessions —
       **not pursued**: development happens in a local terminal, where the hook is inert.
 - [ ] *Nice-to-have:* full `extract_transactions` integration test (needs a checked-in
@@ -146,3 +157,27 @@ signup) · invite/admin-only registration.
       CSP build (large/risky frontend refactor).
 - [x] **Resolved:** the old `plan.txt` chart-period question — charts already group by
       `statement_period` (the PDF's billing cycle), which is the desired behaviour.
+
+## Phase 5 — Docs accuracy *(in progress)*
+
+Added after an audit found this file and the README both asserting things the code
+didn't do. Claims here are only marked done once checked against the code, a test
+run, or `gh` — never against another document.
+
+- [x] **README synced to the code** *(2026-08-05)* — the structure tree still pointed at
+      `static/index.html`, deleted back in Phase 0, and never mentioned `templates/`;
+      six `src/` modules and two scripts were missing; the API table listed 11 of 25
+      routes. Also corrected: `from`/`to` accept `YYYY-MM-DD` as well as `YYYY-MM` and
+      apply to `export.csv` too, `/api/summary/monthly` filters statement periods rather
+      than transaction dates, card numbers come back masked, the `suppressed` tag source
+      was undocumented, and the deploy checklist told you to run gunicorn without noting
+      it is absent from `requirements.txt`.
+- [x] **Decision — `is_default` stays advisory** *(2026-08-05)* — the README had claimed
+      tag/rule `DELETE` refuses defaults. It does not: `api_delete_tag` (`src/web.py`) and
+      `api_delete_tag_rule` filter on `user_id` alone, and the flag is only ever written
+      as `False` on create and echoed in `to_dict()`. Being able to prune unwanted seeded
+      tags is intended, so the flag is display-only by design and no guard was added. The
+      README documents the gap explicitly. Don't "fix" this without a new decision.
+- [ ] Audit the rest of this file the same way — Phases 1/2 are still marked done on the
+      strength of their own prose. The code and tests for them do exist, but the
+      individual sub-claims have not been checked line by line.
