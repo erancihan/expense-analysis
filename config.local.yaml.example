@@ -19,6 +19,11 @@
 # trusted_proxies: 1
 # Rate limit on the login endpoint (brute-force defense).
 # login_ratelimit: "10 per minute"
+# Fernet key encrypting each user's stored Gmail OAuth token at rest. Generate:
+#   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+# Without this, per-user Gmail connect is unavailable. Keep it separate from
+# secret_key so rotating the session secret doesn't invalidate stored tokens.
+# token_encryption_key: "REPLACE_WITH_GENERATED_KEY"
 # Exchange rates to TRY for cross-currency totals. Foreign spend is converted in
 # the dashboard's TRY-equivalent total; currencies without a rate are left out.
 # exchange_rates:

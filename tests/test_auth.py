@@ -429,6 +429,18 @@ class GmailWebTestCase(unittest.TestCase):
         self.assertEqual(r.status_code, 302)
         self.assertEqual(self._token(), '{"t":"fresh"}')
 
+    @patch('src.web.gmail_oauth.credentials_available', return_value=True)
+    @patch('src.config.TOKEN_ENCRYPTION_KEY', '')
+    def test_status_unavailable_without_encryption_key(self, _mock):
+        self.assertFalse(self.client.get('/api/gmail/status').get_json()['available'])
+
+    @patch('src.web.gmail_oauth.credentials_available', return_value=True)
+    @patch('src.config.TOKEN_ENCRYPTION_KEY', '')
+    def test_connect_without_encryption_key_redirects_home(self, _mock):
+        r = self.client.get('/gmail/connect')
+        self.assertEqual(r.status_code, 302)
+        self.assertTrue(r.headers['Location'].endswith('/'))
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -181,9 +181,23 @@ To enable the in-app connect flow, create a **Web application** OAuth client
 4. Enable the Gmail API for the project; add your users as test users (or
    publish the consent screen). Scope used: `gmail.readonly`.
 
-The Connect button is hidden until `secrets/credentials.json` exists. Tokens are
-stored per-user in the database — restrict DB access accordingly (encrypting the
-`gmail_token` column at rest is a reasonable follow-up).
+The Connect button is hidden until both `secrets/credentials.json` exists and a
+token encryption key is configured.
+
+Stored tokens contain a Google refresh token, so they are encrypted at rest with
+Fernet under a dedicated `token_encryption_key`. Generate one with:
+
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Set it as `token_encryption_key` in `config.local.yaml` (or `TOKEN_ENCRYPTION_KEY`
+in the environment). It is deliberately separate from `secret_key` so rotating the
+session secret does not invalidate every stored token.
+
+Without a key, per-user Gmail connect is unavailable — the rest of the app is
+unaffected. Lose the key and connected users simply reconnect; the app reports
+them as disconnected rather than failing.
 
 ### Returning Use
 

@@ -22,7 +22,7 @@ from src.models import Expense, Tag, TagRule, ExpenseTag, User, Budget
 from src.tag_engine import TagEngine
 from src.auth import auth_bp
 from src.extensions import csrf, limiter
-from src import gmail_oauth
+from src import gmail_oauth, token_crypto
 
 logger = logging.getLogger(__name__)
 
@@ -909,19 +909,28 @@ def api_delete_budget(db: Session, budget_id: int):
 
 # ── Gmail connection (per-user OAuth) ─────────────────────────────────────────
 
+def _gmail_connect_available() -> bool:
+    """Whether the in-app Gmail connect flow can run.
+
+    Requires both a configured OAuth client and a token encryption key — without
+    a key, connecting could only store the token unencrypted.
+    """
+    return gmail_oauth.credentials_available() and token_crypto.encryption_available()
+
+
 @app.route('/api/gmail/status')
 @with_db
 def api_gmail_status(db: Session):
     user = db.get(User, current_user.id)
     return jsonify({
         'connected': bool(user and user.gmail_token),
-        'available': gmail_oauth.credentials_available(),
+        'available': _gmail_connect_available(),
     })
 
 
 @app.route('/gmail/connect')
 def gmail_connect():
-    if not gmail_oauth.credentials_available():
+    if not _gmail_connect_available():
         return redirect(url_for('index'))
     redirect_uri = url_for('gmail_callback', _external=True)
     flow = gmail_oauth.build_flow(redirect_uri)

@@ -1,16 +1,56 @@
 from sqlalchemy import (
     Column, Integer, String, Float, DateTime, Text, Boolean,
-    ForeignKey, UniqueConstraint, create_engine,
+    ForeignKey, UniqueConstraint, create_engine, TypeDecorator,
 )
 from sqlalchemy.orm import declarative_base, relationship
 from datetime import datetime, timezone
 
 from flask_login import UserMixin
 
+import logging
+
+from src import token_crypto
+
+logger = logging.getLogger(__name__)
+
 def utc_now():
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 Base = declarative_base()
+
+
+class EncryptedText(TypeDecorator):
+    """A TEXT column encrypted at rest via src.token_crypto.
+
+    Reads and writes are deliberately asymmetric.
+
+    A failed read logs and returns None rather than raising. Flask-Login's
+    user_loader (src/web.py:60-66) loads a User on every authenticated request,
+    and loading decrypts this column — so raising here would turn a wrong or
+    rotated key into a 500 on every page in the app, not just on Gmail features.
+    Returning None degrades to "not connected" and the user reconnects.
+
+    A failed write raises, because storing plaintext would defeat the purpose.
+    SQLAlchemy wraps that as sqlalchemy.exc.StatementError, with the underlying
+    TokenEncryptionError available as `err.orig`.
+    """
+
+    impl = Text
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return None
+        return token_crypto.encrypt(value)
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return None
+        try:
+            return token_crypto.decrypt(value)
+        except token_crypto.TokenEncryptionError as e:
+            logger.error(f"Stored Gmail token could not be decrypted: {e}")
+            return None
 
 
 class User(Base, UserMixin):
@@ -26,7 +66,7 @@ class User(Base, UserMixin):
     # Per-user Gmail OAuth token (JSON from the web consent flow). Null = not
     # connected. The Gmail processor ingests each connected user's statements
     # into their own account.
-    gmail_token = Column(Text, nullable=True)
+    gmail_token = Column(EncryptedText, nullable=True)
     created_at = Column(DateTime, default=utc_now)
 
     def __repr__(self):
