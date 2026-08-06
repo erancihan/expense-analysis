@@ -145,9 +145,30 @@ function app() {
         },
 
         // ── Init ──────────────────────────────────────────────────
-        async init() {
+
+        /* Open on the newest statement period that has data, not on the current
+           calendar month — this month's statement has not been issued yet, so
+           the page used to load empty. Must be awaited before anything else:
+           fetchCards, fetchSummary and fetchExpenses all derive their date
+           range from statementMonth. */
+        async resolveStatementMonth() {
             const now = new Date();
-            this.statementMonth = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+            const thisMonth = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+            // Set it before awaiting: the header renders summaryLabel, which
+            // reads 'All time' while statementMonth is still empty.
+            this.statementMonth = thisMonth;
+            try {
+                const res = await fetch('/api/summary/latest-period');
+                const data = await res.json();
+                // null when the account has no expenses yet.
+                this.statementMonth = data.period || thisMonth;
+            } catch (e) {
+                this.statementMonth = thisMonth;
+            }
+        },
+
+        async init() {
+            await this.resolveStatementMonth();
 
             await Promise.all([
                 this.fetchTags(),

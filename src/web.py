@@ -363,6 +363,35 @@ def api_export_csv(db: Session):
 
 # ── API: Monthly Summary ────────────────────────────────────────────────────
 
+@app.route('/api/summary/latest-period')
+@with_db
+def api_summary_latest_period(db: Session):
+    """The most recent statement period that actually holds data.
+
+    The dashboard opens on this rather than on the current calendar month: the
+    statement for the running month has not been issued yet, so defaulting to
+    it showed an empty table and no chart bar.
+
+    The filters deliberately mirror api_summary_monthly, so the period
+    returned here is always the last bar of the chart. That includes
+    `category != 'Payment'` dropping rows with a NULL category — in SQL
+    `NULL != 'Payment'` is NULL, not true. Imports set the column, so this
+    costs nothing today, and matching the chart matters more than the edge
+    case; fixing it belongs in both queries at once.
+
+    Returns `{'period': None}` for a user with no expenses, which the frontend
+    reads as "fall back to the current month".
+    """
+    period = (
+        db.query(func.max(Expense.statement_period))
+        .filter(Expense.user_id == current_user.id)
+        .filter(Expense.category != 'Payment')
+        .filter(Expense.statement_period.isnot(None))
+        .scalar()
+    )
+    return jsonify({'period': period})
+
+
 @app.route('/api/summary/monthly')
 @with_db
 def api_summary_monthly(db: Session):
