@@ -18,7 +18,7 @@ each user has isolated expenses and connects their own Gmail.
 - [x] **Phase 1 — Stabilize the WIP** *(done 2026-06-26)*
 - [x] **Phase 0 — Hygiene** *(done 2026-06-26)*
 - [x] **Phase 2 — Full multi-user + security** *(2a auth+isolation, 2b hardening, 2c per-user Gmail — all done)*
-- [~] **Phase 3 — Tests & CI** *(parser/tag-engine/auth tests done; CI green on GitHub since 2026-08-05; PDF-fixture test remains)*
+- [x] **Phase 3 — Tests & CI** *(parser/tag-engine/auth tests done; CI green on GitHub since 2026-08-05; fixture-based parser integration test added 2026-08-05)*
 - [~] **Phase 4 — Features** *(CSV export, budgets, cross-currency done; strict-CSP + extra bank parsers remain)*
 - [~] **Phase 5 — Docs accuracy** *(README synced to code 2026-08-05; ROADMAP audit ongoing)*
 
@@ -114,14 +114,20 @@ signup) · invite/admin-only registration.
 - [x] Settings UI: Connect/Disconnect (hidden until an OAuth client is configured).
 - [x] Google Cloud *Web client* setup documented (README). Tests mock the Google libs
       (status/connect/callback/disconnect + processor iteration). Full suite: 69 passing.
-- [ ] *Follow-up:* encrypt the `gmail_token` column at rest.
+- [x] *Follow-up done (2026-08-06):* `gmail_token` is encrypted at rest with Fernet
+      under a dedicated `token_encryption_key` (`src/token_crypto.py` +
+      `EncryptedText` in `src/models.py`). No schema migration was needed — the
+      column was already `TEXT`. Connect is gated on a key being configured, so a
+      token can never be stored unencrypted. Reads that fail to decrypt log and
+      return `None` rather than raising, because Flask-Login loads a `User` on
+      every request and a raising column type would 500 the whole app.
 
 ### Decisions (resolved 2026-06-26)
 - **Auth:** password accounts (werkzeug hashing + Flask-Login sessions).
 - **Default tags:** per-user, seeded on signup → `Tag`/`TagRule` get a `user_id` in 2a-ii.
 - **Registration:** invite/admin-only; initial admin via `scripts/create_user.py`.
 
-## Phase 3 — Tests & CI *(in progress)*
+## Phase 3 — Tests & CI ✅ *(done 2026-08-05)*
 
 - [x] Unit tests for the İşbank parser pure functions (Turkish number normalisation,
       amount/date patterns, card-metadata extraction, position matching).
@@ -137,8 +143,13 @@ signup) · invite/admin-only registration.
       by the file's presence.)*
 - [—] *Optional:* `SessionStart` hook to auto-create the venv for Claude-on-web sessions —
       **not pursued**: development happens in a local terminal, where the hook is inert.
-- [ ] *Nice-to-have:* full `extract_transactions` integration test (needs a checked-in
-      sample PDF fixture).
+- [x] Full `extract_transactions` integration test *(2026-08-05)* — five tests in
+      `tests/test_isbank_integration.py` run the real `pdfminer` layout path against a
+      PDF generated at test time by `tests/fixtures/isbank_pdf.py`. No sample statement
+      is checked in: real statements carry a name and address, which is how `raw_pdf.txt`
+      reached the former parent repo's public history. Covers card metadata, amount
+      matching by row position, the `amount=None` path, description continuation, the
+      `TOPLAM` stop marker, and a missing `TUTAR` header.
 
 ## Phase 4 — Features *(in progress)*
 
