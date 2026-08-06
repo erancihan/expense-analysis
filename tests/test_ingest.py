@@ -65,12 +65,50 @@ class IngestTestCase(unittest.TestCase):
         self.assertEqual(stats['skipped_no_amount'], 1)
         self.assertEqual(stats['inserted'], 0)
 
-    def test_dedup_within_batch(self):
+    def test_dedup_across_batches(self):
+        """Two separate calls = the same statement arriving twice → dedup."""
         fps = set()
         ingest_transactions(self.db, [_tx()], user_id=USER_ID, bank_source='isbank', fingerprints=fps)
         _, stats = ingest_transactions(self.db, [_tx()], user_id=USER_ID, bank_source='isbank', fingerprints=fps)
         self.assertEqual(stats['duplicates'], 1)
         self.assertEqual(stats['inserted'], 0)
+
+    def test_repeated_identical_purchase_in_one_statement_is_kept(self):
+        """Two identical rows printed on ONE statement are two real purchases.
+
+        Found by a live run over 133 real İşbank statements: 52 transactions were
+        being silently dropped this way — e.g. the same 6.89 transit fare twice in
+        one day, which the statement prints as two rows. Deduping on
+        (date|description|amount|card) alone cannot tell them apart, so the key
+        also carries an occurrence index scoped to the statement.
+        """
+        _, stats = ingest_transactions(
+            self.db, [_tx(), _tx()], user_id=USER_ID, bank_source='isbank')
+        self.assertEqual(stats['inserted'], 2)
+        self.assertEqual(stats['duplicates'], 0)
+        self.db.commit()
+        self.assertEqual(self.db.query(Expense).count(), 2)
+
+    def test_re_ingesting_a_statement_with_repeats_still_dedups(self):
+        """The repeat-preserving key must not defeat re-send dedup."""
+        fps = set()
+        ingest_transactions(self.db, [_tx(), _tx()], user_id=USER_ID,
+                            bank_source='isbank', fingerprints=fps)
+        _, stats = ingest_transactions(self.db, [_tx(), _tx()], user_id=USER_ID,
+                                       bank_source='isbank', fingerprints=fps)
+        self.assertEqual(stats['inserted'], 0)
+        self.assertEqual(stats['duplicates'], 2)
+
+    def test_repeats_dedup_against_rows_already_in_the_database(self):
+        """Occurrence indices must be reconstructable from stored rows."""
+        ingest_transactions(self.db, [_tx(), _tx()], user_id=USER_ID, bank_source='isbank')
+        self.db.commit()
+        # No shared set → fingerprints are rebuilt from the DB, which must
+        # yield occurrence 1 AND 2 so a re-import of the same statement dedups.
+        _, stats = ingest_transactions(self.db, [_tx(), _tx()], user_id=USER_ID,
+                                       bank_source='isbank')
+        self.assertEqual(stats['inserted'], 0)
+        self.assertEqual(stats['duplicates'], 2)
 
     def test_dedup_against_existing_rows(self):
         ingest_transactions(self.db, [_tx()], user_id=USER_ID, bank_source='isbank')
