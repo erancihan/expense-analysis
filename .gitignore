@@ -11,3 +11,6 @@ temp/
 __pycache__/
 *.pyc
 .env
+
+# Brainstorm specs and implementation plans: working notes, not repo docs.
+docs/superpowers/
