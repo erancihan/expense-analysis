@@ -1,0 +1,6 @@
+-r requirements.txt
+
+# Test-only: generates synthetic statement PDFs for the parser integration
+# tests. Deliberately kept out of requirements.txt so it does not ship in the
+# Docker image.
+reportlab

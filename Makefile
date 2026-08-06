@@ -3,7 +3,7 @@ PYTHON := $(VENV)/bin/python
 PIP := $(VENV)/bin/pip
 ALEMBIC := $(VENV)/bin/alembic
 
-.PHONY: install web process import-pdfs retag seed backup-tags refresh-db migrations create-user clean
+.PHONY: install install-dev web process import-pdfs retag seed backup-tags refresh-db migrations create-user clean
 
 ## Create virtual environment (only if it doesn't exist)
 $(VENV):
@@ -12,6 +12,10 @@ $(VENV):
 ## Install dependencies
 install: venv
 	$(PIP) install -r requirements.txt
+
+## Install dependencies including test-only ones
+install-dev: venv
+	$(PIP) install -r requirements-dev.txt
 
 ## ── Application ─────────────────────────────────────────────────
 
@@ -118,7 +122,7 @@ create-user: install
 ## ── Testing ─────────────────────────────────────────────────────
 
 ## Run tests
-test: install
+test: install-dev
 	$(PYTHON) -m unittest discover -s tests -v
 
 ## ── Cleanup ─────────────────────────────────────────────────────
