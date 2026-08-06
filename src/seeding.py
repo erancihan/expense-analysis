@@ -69,6 +69,8 @@ def seed_default_tags(db: Session, user_id: int, path: Optional[str] = None) -> 
     else:
         tag_list = [{'name': n, 'color': c, 'icon': i} for n, c, i in FALLBACK_TAGS]
 
+    # Pass 1: create every tag without parents, so a child may be declared
+    # before its parent in the file.
     for entry in tag_list:
         name = entry['name']
         if name not in tags_map:
@@ -84,13 +86,39 @@ def seed_default_tags(db: Session, user_id: int, path: Optional[str] = None) -> 
             tags_map[name] = tag
             created_tags += 1
 
-    # ── Rules (scoped to this user) ──────────────────────────────────────
-    existing_rules = {
-        (r.tag_id, r.pattern)
-        for r in db.query(TagRule).filter_by(user_id=user_id).all()
-    }
-    created_rules = 0
+    # Pass 2: link parents, rejecting unknown parents and depth > 2. Depth is
+    # capped so every rollup stays a single join and the chart's drill-down is
+    # exactly two levels.
+    declared_parent = {e['name']: e.get('parent') for e in tag_list}
+    for entry in tag_list:
+        parent_name = entry.get('parent')
+        if not parent_name:
+            continue
+        if parent_name not in tags_map:
+            raise ValueError(
+                f"Tag '{entry['name']}' names parent '{parent_name}', "
+                f"which is not defined in the seed file."
+            )
+        if declared_parent.get(parent_name):
+            raise ValueError(
+                f"Tag '{entry['name']}' would be at depth 3: its parent "
+                f"'{parent_name}' already has a parent. Only two levels are "
+                f"supported."
+            )
+        tags_map[entry['name']].parent_id = tags_map[parent_name].id
 
+    # ── Rules (scoped to this user) ──────────────────────────────────────
+    # Reconciled, not merely inserted: the seed file is the source of truth for
+    # default rules, so a rule edited or deleted there must take effect on an
+    # already-seeded user. Insert-only seeding made the file misleading — an
+    # edited priority or match_type was ignored, and a deleted rule stayed live
+    # alongside its replacement, so both fired.
+    #
+    # Only is_default rules are touched. Rules the user added through the UI
+    # carry is_default=False (src/web.py) and are never updated or removed.
+    created_rules = updated_rules = removed_rules = 0
+
+    desired = {}
     if data and 'rules' in data:
         for entry in data['rules']:
             tag = tags_map.get(entry['tag'])
@@ -99,17 +127,59 @@ def seed_default_tags(db: Session, user_id: int, path: Optional[str] = None) -> 
                     f"Tag '{entry['tag']}' not found, skipping rule for '{entry['pattern']}'"
                 )
                 continue
-            if (tag.id, entry['pattern']) not in existing_rules:
-                db.add(TagRule(
-                    user_id=user_id,
-                    tag_id=tag.id,
-                    pattern=entry['pattern'],
-                    match_type=entry.get('match_type', 'contains'),
-                    priority=entry.get('priority', 5),
-                    is_default=True,
-                ))
-                created_rules += 1
+            desired[(tag.id, entry['pattern'])] = (
+                entry.get('match_type', 'contains'),
+                entry.get('priority', 5),
+            )
+
+    existing_defaults = {}
+    for rule in db.query(TagRule).filter_by(user_id=user_id, is_default=True).all():
+        existing_defaults[(rule.tag_id, rule.pattern)] = rule
+
+    # Drop default rules the seed file no longer declares.
+    for key, rule in existing_defaults.items():
+        if key not in desired:
+            db.delete(rule)
+            removed_rules += 1
+
+    # Update match_type / priority where the seed file has changed.
+    for key, (match_type, priority) in desired.items():
+        rule = existing_defaults.get(key)
+        if rule is None:
+            continue
+        if rule.match_type != match_type or rule.priority != priority:
+            rule.match_type = match_type
+            rule.priority = priority
+            updated_rules += 1
+
+    # A user-created rule can shadow a default one with the same tag+pattern;
+    # don't insert a duplicate default alongside it.
+    user_owned = {
+        (r.tag_id, r.pattern)
+        for r in db.query(TagRule).filter_by(user_id=user_id, is_default=False).all()
+    }
+
+    for (tag_id, pattern), (match_type, priority) in desired.items():
+        if (tag_id, pattern) in existing_defaults or (tag_id, pattern) in user_owned:
+            continue
+        db.add(TagRule(
+            user_id=user_id,
+            tag_id=tag_id,
+            pattern=pattern,
+            match_type=match_type,
+            priority=priority,
+            is_default=True,
+        ))
+        created_rules += 1
 
     db.commit()
-    logger.info(f"Seeded {created_tags} tags and {created_rules} rules for user {user_id}")
-    return {'tags': created_tags, 'rules': created_rules}
+    logger.info(
+        f"Seeded {created_tags} tags for user {user_id}; rules "
+        f"+{created_rules} ~{updated_rules} -{removed_rules}"
+    )
+    return {
+        'tags': created_tags,
+        'rules': created_rules,
+        'updated': updated_rules,
+        'removed': removed_rules,
+    }

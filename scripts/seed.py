@@ -2,8 +2,14 @@
 """
 Seed default tags and rules for a user.
 
-Reads from data/seeds/tags.yaml (falls back to a built-in set) and inserts any
-tags/rules that user doesn't already have. Safe to run multiple times.
+Reads from data/seeds/tags.yaml (falls back to a built-in set). Safe to run
+repeatedly.
+
+The seed file is the source of truth for DEFAULT rules: rerunning this adds new
+ones, applies changed match_type/priority, and removes rules the file no longer
+declares. Rules you created in the web UI are never touched. Tags are only ever
+added — a stale tag is left in place because deleting one would also delete every
+assignment of it.
 
 Usage:
     ./scripts/seed.py                      # seed the sole/first admin
@@ -44,7 +50,9 @@ def main():
             sys.exit(1)
         counts = seed_default_tags(db, owner.id)
         print(f"Seeding complete for {owner.email}: "
-              f"{counts['tags']} tags, {counts['rules']} rules.")
+              f"{counts['tags']} tags added; rules "
+              f"{counts['rules']} added, {counts['updated']} updated, "
+              f"{counts['removed']} removed.")
     finally:
         db.close()
 

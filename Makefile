@@ -54,20 +54,23 @@ seed: install
 backup-tags: install
 	$(PYTHON) scripts/backup_tags.py
 
-## Full DB refresh: backup tags → reset DB → migrate → seed → download → import → retag
+## Full data refresh: snapshot tags → migrate → seed → download → re-import → retag
+## Rebuilds all expense data in place. Your account, tags and rules survive: it
+## no longer deletes the database file (that wiped the user and left you locked
+## out, since there is no create-user step), and the tag snapshot no longer
+## overwrites data/seeds/tags.yaml, which is the input this reseeds from.
 refresh-db: install
-	@echo "══════ Backing up tags ══════"
-	$(PYTHON) scripts/backup_tags.py
-	@echo "══════ Removing database ══════"
-	rm -f data/expenses.db data/expenses.db-shm data/expenses.db-wal
+	@echo "══════ Snapshotting current tags ══════"
+	@echo "(timestamped — deliberately NOT data/seeds/tags.yaml, which is the input)"
+	$(PYTHON) scripts/backup_tags.py -o data/seeds/tags.snapshot-$$(date +%Y%m%d-%H%M%S).yaml
 	@echo "══════ Running migrations ══════"
 	$(ALEMBIC) upgrade head
-	@echo "══════ Seeding tags ══════"
+	@echo "══════ Reconciling tags & rules from data/seeds/tags.yaml ══════"
 	$(PYTHON) scripts/seed.py
 	@echo "══════ Downloading PDFs ══════"
 	$(PYTHON) scripts/download_pdfs.py
-	@echo "══════ Importing PDFs ══════"
-	$(PYTHON) scripts/import_pdfs.py
+	@echo "══════ Clearing expenses and re-importing ══════"
+	$(PYTHON) scripts/import_pdfs.py --clear
 	@echo "══════ Re-tagging ══════"
 	$(PYTHON) scripts/retag.py
 	@echo "══════ Done ══════"
