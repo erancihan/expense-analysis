@@ -35,8 +35,16 @@ function app() {
         statementCutoffDay: parseInt(localStorage.getItem('cutoffDay')) || 28,
         loading: false,
 
+        // Table sorting — server-side, because /api/expenses is paginated and a
+        // client-side sort would only reorder the page currently displayed.
+        sortBy: 'date',
+        sortDir: 'desc',
+
         // Chart
         chartData: [],
+        // Chart drill-down: null = stacking top-level categories; otherwise the
+        // parent tag name whose children are being shown.
+        chartParent: null,
         chartRange: localStorage.getItem('chartRange') || '1y',
         selectedPeriodData: null,
         totalSpent: 0,
@@ -229,6 +237,8 @@ function app() {
             if (this.filterTag) params.set('tag', this.filterTag);
             if (this.filterCard) params.set('card', this.filterCard);
             if (this.searchQuery) params.set('search', this.searchQuery);
+            params.set('sort', this.sortBy);
+            params.set('dir', this.sortDir);
 
             try {
                 const res = await fetch('/api/expenses?' + params);
@@ -329,7 +339,26 @@ function app() {
             if (this.filterTag) params.set('tag', this.filterTag);
             if (this.filterCard) params.set('card', this.filterCard);
             if (this.searchQuery) params.set('search', this.searchQuery);
+            params.set('sort', this.sortBy);
+            params.set('dir', this.sortDir);
             window.location.href = '/api/expenses/export.csv?' + params.toString();
+        },
+
+        setSort(column) {
+            if (this.sortBy === column) {
+                this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
+            } else {
+                this.sortBy = column;
+                // Dates read best newest-first; everything else A-Z / low-high.
+                this.sortDir = column === 'date' ? 'desc' : 'asc';
+            }
+            this.page = 1;
+            this.fetchExpenses();
+        },
+
+        sortIndicator(column) {
+            if (this.sortBy !== column) return '';
+            return this.sortDir === 'asc' ? '▲' : '▼';
         },
 
         nextPage() {
@@ -571,6 +600,14 @@ function app() {
             if (!chartInstance) {
                 chartInstance = echarts.init(el, 'dark');
                 window.addEventListener('resize', () => chartInstance && chartInstance.resize());
+                // Click a top-level series to drill into its children.
+                chartInstance.on('click', (params) => {
+                    if (this.chartParent !== null) return;   // already at child level
+                    const clicked = params.seriesName;
+                    if (!this.tags.some(t => t.parent_name === clicked)) return;
+                    this.chartParent = clicked;
+                    this.renderChart();
+                });
             }
 
             if (!this.chartData || this.chartData.length === 0) {
@@ -578,11 +615,17 @@ function app() {
                 return;
             }
 
-            // Collect all unique tags across months
+            // Stack exactly ONE level. by_tag carries both parents and children
+            // (both are stored on each expense), so stacking everything would
+            // count each expense twice.
             const allTags = new Set();
             for (const m of this.chartData) {
-                for (const tagName of Object.keys(m.by_tag || {})) {
-                    allTags.add(tagName);
+                for (const [tagName, info] of Object.entries(m.by_tag || {})) {
+                    const isTopLevel = info.parent == null;
+                    const keep = this.chartParent === null
+                        ? isTopLevel
+                        : info.parent === this.chartParent;
+                    if (keep) allTags.add(tagName);
                 }
             }
             const tagNames = [...allTags].sort();

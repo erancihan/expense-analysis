@@ -18,5 +18,22 @@
                     class="px-3 py-1.5 transition-colors border-l border-slate-700/50">5 Years</button>
         </div>
     </div>
+    <!-- Drill-down breadcrumb. The chart stacks top-level categories only;
+         clicking one shows its children for the same periods. -->
+    <div class="flex items-center gap-2 mb-3 text-sm">
+        <template x-if="chartParent !== null">
+            <div class="flex items-center gap-2">
+                <button @click="chartParent = null; renderChart()"
+                        class="text-indigo-400 hover:text-indigo-300 transition-colors">
+                    ← All categories
+                </button>
+                <span class="text-slate-600">/</span>
+                <span class="text-slate-300 font-medium" x-text="chartParent"></span>
+            </div>
+        </template>
+        <template x-if="chartParent === null">
+            <span class="text-slate-500 text-xs">Click a category to see what's inside it.</span>
+        </template>
+    </div>
     <div id="monthlyChart" class="w-full" style="height: 380px;"></div>
 </section>

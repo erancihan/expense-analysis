@@ -11,13 +11,37 @@
         <!-- Tags list -->
         <div>
             <h3 class="text-sm font-medium text-slate-400 uppercase tracking-wider mb-3">Tags</h3>
+            <!-- Grouped by parent category: the parent chip leads each row, its
+                 children follow. Deleting a parent is refused while it still has
+                 children, since that would take their expense assignments too. -->
+            <div class="space-y-2 mb-3">
+                <template x-for="p in tags.filter(t => !t.parent_id)" :key="p.id">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <button type="button" @click="openEditTag(p)" class="tag-chip inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-sm font-semibold hover:scale-105 transition-transform focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                              :style="'background-color:' + p.color + '33; color:' + p.color + '; border: 1px solid ' + p.color + '88'">
+                            <span x-text="p.icon"></span>
+                            <span x-text="p.name"></span>
+                        </button>
+                        <span class="text-slate-600">›</span>
+                        <template x-for="c in tags.filter(t => t.parent_id === p.id)" :key="c.id">
+                            <button type="button" @click="openEditTag(c)" class="tag-chip inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium hover:scale-105 transition-transform focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                  :style="'background-color:' + c.color + '22; color:' + c.color + '; border: 1px solid ' + c.color + '44'">
+                                <span x-text="c.icon"></span>
+                                <span x-text="c.name"></span>
+                            </button>
+                        </template>
+                    </div>
+                </template>
+            </div>
             <div class="flex flex-wrap gap-2">
-                <template x-for="tag in tags" :key="tag.id">
-                    <button type="button" @click="openEditTag(tag)" class="tag-chip inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-sm font-medium hover:scale-105 transition-transform focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-900"
-                          :style="'background-color:' + tag.color + '22; color:' + tag.color + '; border: 1px solid ' + tag.color + '44'">
-                        <span x-text="tag.icon"></span>
-                        <span x-text="tag.name"></span>
-                        <span x-show="tag.is_default" class="text-xs opacity-50">(default)</span>
+                <!-- Any tag with no parent_id that is also nobody's parent shows
+                     here, so a stray flat tag can never become invisible. -->
+                <template x-for="t in tags.filter(t => !t.parent_id && !tags.some(o => o.parent_id === t.id))" :key="t.id">
+                    <button type="button" @click="openEditTag(t)" class="tag-chip inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-sm font-medium hover:scale-105 transition-transform focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          :style="'background-color:' + t.color + '22; color:' + t.color + '; border: 1px solid ' + t.color + '44'">
+                        <span x-text="t.icon"></span>
+                        <span x-text="t.name"></span>
+                        <span x-show="t.is_default" class="text-xs opacity-50">(default)</span>
                     </button>
                 </template>
                 <button type="button" @click="openCreateTag()"

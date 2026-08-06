@@ -14,7 +14,7 @@ from flask import Flask, jsonify, request, send_from_directory, render_template,
 from flask_login import LoginManager, current_user
 from werkzeug.middleware.proxy_fix import ProxyFix
 from sqlalchemy import func, extract
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from src.config import SECRET_KEY, SESSION_COOKIE_SECURE, TRUSTED_PROXIES, EXCHANGE_RATES
 from src.database import SessionLocal
@@ -180,15 +180,55 @@ def parse_date_filter(date_str: str, is_end: bool = False):
 
 # ── API: Expenses ────────────────────────────────────────────────────────────
 
-def _filtered_user_expenses(db: Session):
-    """Current user's expenses with from/to/card/tag/search filters applied,
-    newest first. Shared by the list and CSV-export endpoints so they can't drift.
+# Sortable columns, exposed as ?sort=. Anything else falls back to 'date' rather
+# than erroring, so a stale bookmark cannot 500 the page.
+_SORT_COLUMNS = {
+    'date': Expense.date,
+    'description': Expense.description,
+    'amount': Expense.amount,
+    'card': Expense.card_number,
+}
+
+
+def _apply_sort(db: Session, query):
+    """Order an expense query from ?sort= and ?dir=.
+
+    Server-side by necessity: /api/expenses is paginated, so sorting on the
+    client would only reorder the page currently displayed while looking correct.
     """
-    query = (
-        db.query(Expense)
-        .filter(Expense.user_id == current_user.id)
-        .order_by(Expense.date.desc(), Expense.id.desc())
-    )
+    sort = request.args.get('sort', 'date')
+    descending = request.args.get('dir', 'desc').lower() != 'asc'
+
+    if sort == 'tag':
+        # Alphabetically-first "parent/child" label per expense, so the ordering
+        # reflects the hierarchy. Untagged expenses yield NULL and are forced
+        # last in both directions.
+        parent = aliased(Tag)
+        label = (
+            db.query(func.min(func.coalesce(parent.name, '') + '/' + Tag.name))
+            .select_from(ExpenseTag)
+            .join(Tag, Tag.id == ExpenseTag.tag_id)
+            .outerjoin(parent, parent.id == Tag.parent_id)
+            .filter(ExpenseTag.expense_id == Expense.id)
+            .filter(ExpenseTag.source != 'suppressed')
+            .correlate(Expense)
+            .scalar_subquery()
+        )
+        direction = label.desc() if descending else label.asc()
+        return query.order_by(label.is_(None), direction, Expense.id.desc())
+
+    column = _SORT_COLUMNS.get(sort, Expense.date)
+    direction = column.desc() if descending else column.asc()
+    # id is a stable tiebreaker so pagination cannot repeat or skip rows.
+    return query.order_by(direction, Expense.id.desc())
+
+
+def _filtered_user_expenses(db: Session):
+    """Current user's expenses with from/to/card/tag/search filters applied and
+    ?sort=/?dir= ordering. Shared by the list and CSV-export endpoints so they
+    can't drift.
+    """
+    query = db.query(Expense).filter(Expense.user_id == current_user.id)
 
     dt_from = parse_date_filter(request.args.get('from'), is_end=False)
     if dt_from:
@@ -219,7 +259,7 @@ def _filtered_user_expenses(db: Session):
     if search and len(search) <= 200:
         query = query.filter(Expense.description.ilike(f'%{search}%'))
 
-    return query
+    return _apply_sort(db, query)
 
 
 @app.route('/api/expenses')
@@ -415,6 +455,16 @@ def api_summary_monthly(db: Session):
     # Collect all periods (from both TRY and non-TRY)
     all_periods = set(monthly.keys()) | set(currency_monthly.keys())
 
+    # tag name -> parent tag name (or None). Both levels are stored on each
+    # expense, so by_tag contains parents AND children. Any consumer that sums
+    # across entries must pick a single level or it double-counts; the dashboard
+    # chart renders only entries whose parent is None. Budgets index by an exact
+    # tag name, so they work at either level.
+    parent_by_name = {
+        t.name: (t.parent.name if t.parent else None)
+        for t in db.query(Tag).filter_by(user_id=current_user.id).all()
+    }
+
     # Build sorted result
     result = []
     for period in sorted(all_periods):
@@ -425,6 +475,7 @@ def api_summary_monthly(db: Session):
             by_tag[tag_name] = {
                 'total': round(data['total'], 2),
                 'color': data['color'],
+                'parent': parent_by_name.get(tag_name),
             }
         by_currency = {}
         for cur, data in currency_monthly.get(period, {}).items():
@@ -494,12 +545,24 @@ def api_create_tag(db: Session):
         db.commit()
         return jsonify(existing.to_dict())
 
+    parent_id = data.get('parent_id')
+    if parent_id is not None:
+        parent = db.query(Tag).filter_by(id=parent_id, user_id=current_user.id).first()
+        if not parent:
+            return jsonify({'error': 'Parent tag not found'}), 404
+        if parent.parent_id is not None:
+            return jsonify({
+                'error': 'Only two levels of tags are supported; that parent '
+                         'already has a parent.'
+            }), 400
+
     tag = Tag(
         user_id=current_user.id,
         name=name,
         color=data.get('color', '#6366f1')[:7],
         icon=data.get('icon', '🏷️')[:4],
         is_default=False,
+        parent_id=parent_id,
     )
     db.add(tag)
     db.commit()
@@ -512,6 +575,16 @@ def api_delete_tag(db: Session, tag_id: int):
     tag = db.query(Tag).filter_by(id=tag_id, user_id=current_user.id).first()
     if not tag:
         return jsonify({'error': 'Tag not found'}), 404
+
+    # Tag.children cascades delete-orphan, and each child cascades its own
+    # expense_tags — so deleting a parent would silently remove every assignment
+    # its children carry. Make the caller deal with the children first.
+    if tag.children:
+        return jsonify({
+            'error': 'This tag has child tags. Delete or re-parent the children '
+                     'first — deleting a parent would remove them and every '
+                     'expense assignment they carry.'
+        }), 400
 
     db.delete(tag)
     db.commit()

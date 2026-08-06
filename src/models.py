@@ -109,11 +109,22 @@ class Tag(Base):
     color = Column(String, default='#6366f1')                # hex color for UI chip
     icon = Column(String, default='🏷️')                      # emoji
     is_default = Column(Boolean, default=False)              # shipped with app
+    # Two-level hierarchy: a parent tag has parent_id=None; a child points at it.
+    # Depth is capped at 2 (validated in src/seeding.py and POST /api/tags) so
+    # every rollup stays a single join.
+    parent_id = Column(Integer, ForeignKey('tags.id'), nullable=True, index=True)
     created_at = Column(DateTime, default=utc_now)
 
     # Relationships
     expense_tags = relationship('ExpenseTag', back_populates='tag', cascade='all, delete-orphan')
     rules = relationship('TagRule', back_populates='tag', cascade='all, delete-orphan')
+    # NOTE: deleting a parent takes its children — and, through their own
+    # expense_tags cascade, every assignment those children carry. web.py's
+    # DELETE /api/tags/<id> refuses to delete a tag that still has children.
+    children = relationship(
+        'Tag', back_populates='parent', cascade='all, delete-orphan',
+    )
+    parent = relationship('Tag', back_populates='children', remote_side=[id])
 
     # Tag names are unique per user, not globally.
     __table_args__ = (
@@ -130,6 +141,8 @@ class Tag(Base):
             'color': self.color,
             'icon': self.icon,
             'is_default': self.is_default,
+            'parent_id': self.parent_id,
+            'parent_name': self.parent.name if self.parent else None,
         }
 
 
