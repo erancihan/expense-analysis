@@ -442,6 +442,11 @@ def api_summary_monthly(db: Session):
     tag_monthly = {}   # {period: {tag_name: {'total': float, 'color': str}}}
     currency_monthly = {}  # {period: {currency: {'total': float, 'count': int}}}
     card_monthly = {}      # {period: {card_number: {'total': float, 'count': int, 'currency': str}}}
+    # {period: {'total': float, 'count': int}} for expenses carrying no active
+    # tag. The client cannot derive this by subtracting by_tag from the total:
+    # by_tag holds parents AND children, and an expense under two parents
+    # appears in both, so that sum overshoots the real tagged spend.
+    untagged_monthly = {}
 
     for expense in expenses:
         period = expense.statement_period  # e.g. "2026-04"
@@ -454,6 +459,12 @@ def api_summary_monthly(db: Session):
                 monthly[period] = {'total': 0.0, 'count': 0}
             monthly[period]['total'] += expense.amount
             monthly[period]['count'] += 1
+
+            if expense.id not in tag_assignments:
+                if period not in untagged_monthly:
+                    untagged_monthly[period] = {'total': 0.0, 'count': 0}
+                untagged_monthly[period]['total'] += expense.amount
+                untagged_monthly[period]['count'] += 1
 
         # Per-currency breakdown
         if period not in currency_monthly:
@@ -529,6 +540,7 @@ def api_summary_monthly(db: Session):
             rate = 1.0 if cur == 'TRY' else EXCHANGE_RATES.get(cur)
             if rate is not None:
                 converted_total += data['total'] * rate
+        u = untagged_monthly.get(period, {'total': 0.0, 'count': 0})
         result.append({
             'year': year,
             'month': month,
@@ -536,6 +548,8 @@ def api_summary_monthly(db: Session):
             'total': round(m['total'], 2),
             'converted_total': round(converted_total, 2),
             'count': m['count'],
+            'untagged': round(u['total'], 2),
+            'untagged_count': u['count'],
             'by_tag': by_tag,
             'by_currency': by_currency,
             'by_card': by_card,
@@ -796,6 +810,51 @@ def api_set_expense_tags(db: Session, expense_id: int):
 
     db.commit()
     return jsonify({'ok': True})
+
+
+@app.route('/api/expenses/<int:expense_id>/tags/<int:tag_id>', methods=['POST'])
+@with_db
+def api_add_expense_tag(db: Session, expense_id: int, tag_id: int):
+    """Attach one tag to one expense directly — no pattern, no rule, no re-tag.
+
+    Until this existed the only way to tag from the UI was to invent a pattern
+    and create an auto-rule, which then re-tagged every expense in the account.
+    One-off merchants had no sensible pattern to give.
+
+    Additive and idempotent, unlike POST /api/expenses/<id>/tags, which
+    replaces the whole manual set.
+
+    The parent is written alongside the child, matching TagEngine.apply_rules:
+    the chart stacks parent-level entries, so a child-only row would leave the
+    expense invisible there. Both rows are stored source='manual' because
+    retag_all() deletes every source='auto' row — an 'auto' parent would vanish
+    on the next re-tag and never return, since no rule matches it.
+    """
+    if not _owns_expense(db, expense_id):
+        return jsonify({'error': 'Expense not found'}), 404
+
+    tag = db.query(Tag).filter_by(id=tag_id, user_id=current_user.id).first()
+    if not tag:
+        return jsonify({'error': 'Tag not found'}), 404
+
+    wanted = [tag.id]
+    if tag.parent_id is not None:
+        wanted.append(tag.parent_id)
+
+    added = []
+    for tid in wanted:
+        et = db.query(ExpenseTag).filter_by(expense_id=expense_id, tag_id=tid).first()
+        if et is None:
+            db.add(ExpenseTag(expense_id=expense_id, tag_id=tid, source='manual'))
+            added.append(tid)
+        elif et.source == 'suppressed':
+            # Adding back something previously hidden is an explicit choice, so
+            # promote it to manual rather than leaving it suppressed.
+            et.source = 'manual'
+            added.append(tid)
+
+    db.commit()
+    return jsonify({'ok': True, 'added': added})
 
 
 @app.route('/api/expenses/<int:expense_id>/tags/<int:tag_id>', methods=['DELETE'])

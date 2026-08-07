@@ -11,6 +11,7 @@ from datetime import datetime
 from werkzeug.security import generate_password_hash
 
 from src.database import SessionLocal, engine
+from src.extensions import limiter
 from src.models import Base, Expense, ExpenseTag, Tag, User
 from src.web import app
 
@@ -40,8 +41,9 @@ class LatestPeriodTestCase(unittest.TestCase):
 
         app.config['TESTING'] = True
         # Per-test, not module scope: `app` is shared and tests/test_auth.py
-        # re-enables CSRF inside one of its cases.
+        # re-enables CSRF and the limiter inside its own cases.
         app.config['WTF_CSRF_ENABLED'] = False
+        limiter.enabled = False
         self.client = app.test_client()
 
     def _login(self, email='owner@example.com'):

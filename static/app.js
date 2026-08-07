@@ -80,6 +80,7 @@ function app() {
         detailsLoading: false,
         currentExpense: null,
         quickTagForm: { pattern: '', tag_id: '', match_type: 'contains' },
+        manualTagId: '',   // direct per-expense assignment, no rule involved
 
         // Edit tag
         editTagModalOpen: false,
@@ -403,6 +404,9 @@ function app() {
                 tag_id: '',
                 match_type: 'contains'
             };
+            // Cleared per expense: the arrow keys walk the list without closing
+            // the modal, so a leftover selection would belong to another row.
+            this.manualTagId = '';
             this.manageTagsModalOpen = true;
             this.detailsLoading = true;
 
@@ -417,6 +421,23 @@ function app() {
             } finally {
                 this.detailsLoading = false;
             }
+        },
+
+        /* Tag this one expense and nothing else. The rule form below it needs a
+           pattern and re-tags the whole account, which is the wrong tool for a
+           one-off merchant. */
+        async addTagToExpense() {
+            if (!this.currentExpense || !this.manualTagId) return;
+            const res = await fetch(
+                `/api/expenses/${this.currentExpense.id}/tags/${this.manualTagId}`,
+                { method: 'POST' });
+            if (!res.ok) return;
+            this.manualTagId = '';
+            await Promise.all([
+                this.fetchExpenses(),
+                this.fetchSummary(),
+            ]);
+            if (this.manageTagsModalOpen) await this.openManageTags(this.currentExpense);
         },
 
         async submitQuickTag() {
@@ -676,18 +697,24 @@ function app() {
                 };
             });
 
-            // Add "untagged" series (total minus sum of tags)
-            series.push({
-                name: 'untagged',
-                type: 'bar',
-                stack: 'total',
-                emphasis: { focus: 'series' },
-                itemStyle: { color: '#334155', borderRadius: [2, 2, 0, 0] },
-                data: this.chartData.map(m => {
-                    const taggedTotal = Object.values(m.by_tag || {}).reduce((s, t) => s + t.total, 0);
-                    return Math.max(0, m.total - taggedTotal);
-                }),
-            });
+            // "untagged" comes from the server. It used to be derived here as
+            // total minus the sum of by_tag, which broke once by_tag started
+            // carrying parents alongside children: the sum then double-counts,
+            // goes past the total, and the segment clamped to zero — hiding a
+            // third of some months. Not derivable client-side at all, since an
+            // expense under two parents is counted in both.
+            // Only at top level: drilled into one parent, "no tag at all" is not
+            // one of that parent's children.
+            if (this.chartParent === null) {
+                series.push({
+                    name: 'untagged',
+                    type: 'bar',
+                    stack: 'total',
+                    emphasis: { focus: 'series' },
+                    itemStyle: { color: '#334155', borderRadius: [2, 2, 0, 0] },
+                    data: this.chartData.map(m => m.untagged ?? 0),
+                });
+            }
 
             const option = {
                 backgroundColor: 'transparent',
