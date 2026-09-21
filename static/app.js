@@ -31,7 +31,11 @@ function app() {
         settingsModalOpen: false,
         gmailConnected: false,
         gmailAvailable: false,
+        // Last period the chart shows. The header navigation moves only this.
         statementMonth: '',
+        // Period the expense list, card tabs and budgets show. Chosen by
+        // clicking a bar, so browsing the chart leaves the rest of the page alone.
+        selectedPeriod: '',
         statementCutoffDay: parseInt(localStorage.getItem('cutoffDay')) || 28,
         loading: false,
 
@@ -42,9 +46,6 @@ function app() {
 
         // Chart
         chartData: [],
-        // Chart drill-down: null = stacking top-level categories; otherwise the
-        // parent tag name whose children are being shown.
-        chartParent: null,
         chartRange: localStorage.getItem('chartRange') || '1y',
         selectedPeriodData: null,
         totalSpent: 0,
@@ -88,21 +89,32 @@ function app() {
 
         // ── Computed ───────────────────────────────────────────────
         get summaryLabel() {
-            if (!this.statementMonth) return 'All time';
+            if (!this.selectedPeriod) return 'All time';
             return `Statement: ${this.actualDateFrom} → ${this.actualDateTo}`;
         },
 
+        // The current calendar month. Statement navigation stops here: a later
+        // statement cannot exist yet.
+        get maxStatementMonth() {
+            const now = new Date();
+            return now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+        },
+
+        get canShiftStatementForward() {
+            return !!this.statementMonth && this.statementMonth < this.maxStatementMonth;
+        },
+
         get actualDateFrom() {
-            if (!this.statementMonth) return '';
-            const [y, m] = this.statementMonth.split('-');
+            if (!this.selectedPeriod) return '';
+            const [y, m] = this.selectedPeriod.split('-');
             let date = new Date(parseInt(y), parseInt(m) - 2, this.statementCutoffDay + 1);
             const pad = n => String(n).padStart(2, '0');
             return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
         },
 
         get actualDateTo() {
-            if (!this.statementMonth) return '';
-            const [y, m] = this.statementMonth.split('-');
+            if (!this.selectedPeriod) return '';
+            const [y, m] = this.selectedPeriod.split('-');
             let date = new Date(parseInt(y), parseInt(m) - 1, this.statementCutoffDay);
             const pad = n => String(n).padStart(2, '0');
             return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
@@ -150,22 +162,23 @@ function app() {
         /* Open on the newest statement period that has data, not on the current
            calendar month — this month's statement has not been issued yet, so
            the page used to load empty. Must be awaited before anything else:
-           fetchCards, fetchSummary and fetchExpenses all derive their date
-           range from statementMonth. */
+           fetchSummary derives its range from statementMonth, and fetchCards
+           and fetchExpenses derive theirs from selectedPeriod. */
         async resolveStatementMonth() {
-            const now = new Date();
-            const thisMonth = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+            const thisMonth = this.maxStatementMonth;
             // Set it before awaiting: the header renders summaryLabel, which
-            // reads 'All time' while statementMonth is still empty.
-            this.statementMonth = thisMonth;
+            // reads 'All time' while selectedPeriod is still empty.
+            this.statementMonth = this.selectedPeriod = thisMonth;
             try {
                 const res = await fetch('/api/summary/latest-period');
                 const data = await res.json();
                 // null when the account has no expenses yet.
-                this.statementMonth = data.period || thisMonth;
+                const period = data.period || thisMonth;
+                this.statementMonth = period > thisMonth ? thisMonth : period;
             } catch (e) {
                 this.statementMonth = thisMonth;
             }
+            this.selectedPeriod = this.statementMonth;
         },
 
         async init() {
@@ -335,16 +348,26 @@ function app() {
             const [y, m] = this.statementMonth.split('-');
             let date = new Date(parseInt(y), parseInt(m) - 1 + offset, 1);
             const pad = n => String(n).padStart(2, '0');
-            this.statementMonth = `${date.getFullYear()}-${pad(date.getMonth() + 1)}`;
-            this.applyDateRange();
+            this.setStatementMonth(`${date.getFullYear()}-${pad(date.getMonth() + 1)}`);
         },
 
-        applyDateRange() {
+        /* Move the chart window and nothing else. The expense list keeps its
+           period until a bar is clicked. The month input's max attribute does
+           not stop a typed value, so the limit is enforced here too. */
+        setStatementMonth(month) {
+            if (month && month > this.maxStatementMonth) month = this.maxStatementMonth;
+            this.statementMonth = month;
+            this.fetchSummary();
+        },
+
+        // Show one period's expenses. Called from a click on the chart.
+        selectPeriod(period) {
+            if (!period || period === this.selectedPeriod) return;
+            this.selectedPeriod = period;
+            this.selectedPeriodData = this.chartData.find(m => m.label === period) || null;
             this.page = 1;
-            this.fetchCards().then(() => {
-                this.fetchSummary();
-                this.fetchExpenses();
-            });
+            this.renderChart();   // move the selected-period highlight
+            this.fetchCards().then(() => this.fetchExpenses());
         },
 
         setChartRange(range) {
@@ -609,10 +632,10 @@ function app() {
             this.avgMonthly = this.chartData.length > 0 ? this.totalSpent / this.chartData.length : 0;
             this.totalPayments = 0;
 
-            // Default to the last (most recent) period
-            if (this.chartData.length > 0) {
-                this.selectedPeriodData = this.chartData[this.chartData.length - 1];
-            }
+            // Budgets follow the clicked period. When the chart has been moved
+            // away from it, keep the data from the last time it was in view.
+            const selected = this.chartData.find(m => m.label === this.selectedPeriod);
+            if (selected) this.selectedPeriodData = selected;
         },
 
         // ── Formatters ────────────────────────────────────────────
@@ -642,13 +665,15 @@ function app() {
             if (!chartInstance) {
                 chartInstance = echarts.init(el, 'dark');
                 window.addEventListener('resize', () => chartInstance && chartInstance.resize());
-                // Click a top-level series to drill into its children.
-                chartInstance.on('click', (params) => {
-                    if (this.chartParent !== null) return;   // already at child level
-                    const clicked = params.seriesName;
-                    if (!this.tags.some(t => t.parent_name === clicked)) return;
-                    this.chartParent = clicked;
-                    this.renderChart();
+                // Click anywhere in a period's column to list its expenses.
+                // Listening on the canvas, not on the series, keeps a short
+                // bar as easy to hit as the column the tooltip shadow shows.
+                chartInstance.getZr().on('click', (e) => {
+                    const point = [e.offsetX, e.offsetY];
+                    if (!chartInstance.containPixel('grid', point)) return;
+                    const idx = Math.round(chartInstance.convertFromPixel({ xAxisIndex: 0 }, e.offsetX));
+                    const period = this.chartData[idx];
+                    if (period) this.selectPeriod(period.label);
                 });
             }
 
@@ -657,17 +682,13 @@ function app() {
                 return;
             }
 
-            // Stack exactly ONE level. by_tag carries both parents and children
-            // (both are stored on each expense), so stacking everything would
-            // count each expense twice.
+            // Stack top-level tags only. by_tag carries both parents and
+            // children (both are stored on each expense), so stacking
+            // everything would count each expense twice.
             const allTags = new Set();
             for (const m of this.chartData) {
                 for (const [tagName, info] of Object.entries(m.by_tag || {})) {
-                    const isTopLevel = info.parent == null;
-                    const keep = this.chartParent === null
-                        ? isTopLevel
-                        : info.parent === this.chartParent;
-                    if (keep) allTags.add(tagName);
+                    if (info.parent == null) allTags.add(tagName);
                 }
             }
             const tagNames = [...allTags].sort();
@@ -703,18 +724,14 @@ function app() {
             // goes past the total, and the segment clamped to zero — hiding a
             // third of some months. Not derivable client-side at all, since an
             // expense under two parents is counted in both.
-            // Only at top level: drilled into one parent, "no tag at all" is not
-            // one of that parent's children.
-            if (this.chartParent === null) {
-                series.push({
-                    name: 'untagged',
-                    type: 'bar',
-                    stack: 'total',
-                    emphasis: { focus: 'series' },
-                    itemStyle: { color: '#334155', borderRadius: [2, 2, 0, 0] },
-                    data: this.chartData.map(m => m.untagged ?? 0),
-                });
-            }
+            series.push({
+                name: 'untagged',
+                type: 'bar',
+                stack: 'total',
+                emphasis: { focus: 'series' },
+                itemStyle: { color: '#334155', borderRadius: [2, 2, 0, 0] },
+                data: this.chartData.map(m => m.untagged ?? 0),
+            });
 
             const option = {
                 backgroundColor: 'transparent',
@@ -796,7 +813,13 @@ function app() {
                 xAxis: {
                     type: 'category',
                     data: labels,
-                    axisLabel: { color: '#64748b', fontSize: 11 },
+                    axisLabel: {
+                        color: '#64748b',
+                        fontSize: 11,
+                        // Mark the period the expense list shows.
+                        formatter: (v) => v === this.selectedPeriod ? `{selected|${v}}` : v,
+                        rich: { selected: { color: '#a5b4fc', fontSize: 11, fontWeight: 600 } },
+                    },
                     axisLine: { lineStyle: { color: '#334155' } },
                 },
                 yAxis: {

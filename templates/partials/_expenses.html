@@ -1,7 +1,14 @@
 <!-- Expenses table with filters, card tabs, pagination -->
 <section class="glass-card rounded-2xl p-6 mb-8">
     <div class="flex items-center justify-between flex-wrap gap-4 mb-4">
-        <h2 class="text-lg font-semibold text-slate-200">Expenses</h2>
+        <!-- The period comes from the chart, not the header navigation. -->
+        <div class="flex items-baseline gap-3">
+            <h2 class="text-lg font-semibold text-slate-200">Expenses</h2>
+            <span x-show="selectedPeriod" class="text-sm text-slate-400">
+                <span class="font-medium text-indigo-300" x-text="selectedPeriod"></span>
+                · <span x-text="actualDateFrom + ' → ' + actualDateTo"></span>
+            </span>
+        </div>
 
         <!-- Filters -->
         <div class="flex items-center gap-3 flex-wrap">

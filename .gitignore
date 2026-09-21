@@ -4,6 +4,7 @@ data/pdfs/
 data/expenses.db
 data/expenses.db-shm
 data/expenses.db-wal
+data/backups/
 data/seeds/*
 !data/seeds/.gitkeep
 !data/seeds/*.example
