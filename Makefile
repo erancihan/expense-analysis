@@ -3,7 +3,7 @@ PYTHON := $(VENV)/bin/python
 PIP := $(VENV)/bin/pip
 ALEMBIC := $(VENV)/bin/alembic
 
-.PHONY: install install-dev web process import-pdfs retag seed backup-tags refresh-db migrations create-user clean
+.PHONY: install install-dev web process import-pdfs retag seed backup-tags refresh-db migrations create-user clean backfill-statements fetch-rates
 
 ## Create virtual environment (only if it doesn't exist)
 $(VENV):
@@ -54,6 +54,10 @@ seed: install
 backup-tags: install
 	$(PYTHON) scripts/backup_tags.py
 
+## Fetch monthly FX (and CPI, with evds_api_key) into the rates table
+fetch-rates: install
+	$(PYTHON) scripts/fetch_rates.py
+
 ## Full data refresh: snapshot tags → migrate → seed → download → re-import → retag
 ## Rebuilds all expense data in place. Your account, tags and rules survive: it
 ## no longer deletes the database file (that wiped the user and left you locked
@@ -88,6 +92,11 @@ import-pdfs: install
 ## Import all PDFs (clearing existing data first)
 import-pdfs-clean: install
 	$(PYTHON) scripts/import_pdfs.py --clear
+
+## Link expenses to statements + fill installment fields, in place.
+## Dry run unless APPLY=1 (which backs up the DB and tag sets to data/backups/ first).
+backfill-statements: install
+	$(PYTHON) scripts/backfill_statements.py $$([ -n "$(APPLY)" ] && echo "--apply")
 
 ## Re-tag all expenses using current rules
 retag: install

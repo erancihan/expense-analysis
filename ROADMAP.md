@@ -21,6 +21,7 @@ each user has isolated expenses and connects their own Gmail.
 - [x] **Phase 3 — Tests & CI** *(parser/tag-engine/auth tests done; CI green on GitHub since 2026-08-05; fixture-based parser integration test added 2026-08-05)*
 - [~] **Phase 4 — Features** *(CSV export, budgets, cross-currency done; strict-CSP + extra bank parsers remain)*
 - [~] **Phase 5 — Docs accuracy** *(README synced to code 2026-08-05; ROADMAP audit ongoing)*
+- [~] **Phase 6 — Insights** *(foundation code in progress; see the Phase 6 section)*
 
 ---
 
@@ -192,3 +193,24 @@ run, or `gh` — never against another document.
 - [ ] Audit the rest of this file the same way — Phases 1/2 are still marked done on the
       strength of their own prose. The code and tests for them do exist, but the
       individual sub-claims have not been checked line by line.
+
+## Phase 6 — Insights *(in progress)*
+
+Graphs and insights about spending habits on a separate `/insights` page,
+computed at request time (nothing derived from a user's data enters this
+public repo). Five sub-projects, each with its own spec → plan → build cycle:
+0 foundation, 1 page shell + "Am I spending more?", 2 "What's locked in?",
+3 "Where does it go?", 4 "What's unusual?".
+
+**0 — Foundation**
+- [ ] Parser reads the closing date from the label's own row (it took the first
+      date in the text, which filed some 2021-era statements a month late) and
+      the TAKSİT BİLGİSİ installment column.
+- [ ] `statements` table; `expenses.statement_id` + `installment_*`; `rates` table.
+- [ ] Backfill applied to the real data in place (no insert/delete/retag; tag
+      sets verified identical).
+- [ ] `src/analytics/`: months, coverage, merchant normalization, rates, `load_spend`.
+- [ ] `make fetch-rates` run; CPI live-checked once an EVDS key exists.
+
+Mark items done only after checking them against the code, a test run, or the
+backfill report — not against this file.

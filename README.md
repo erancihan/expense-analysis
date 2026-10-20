@@ -12,6 +12,8 @@ A personal expense tracker that parses İşbank credit card statement PDFs, cate
 - **Budgets** — Per-tag and overall monthly limits with spent/limit progress on the dashboard
 - **CSV Export** — Downloads the current filtered view; text fields are formula-injection-safe
 - **Cross-Currency Totals** — Configurable exchange rates produce a TRY-equivalent grand total alongside per-currency figures
+- **Statements & Installments** — Every import records its statement (card + closing date) and the installment column (`n/N` and the full purchase amount), so missing statements are detectable and installment plans can be seen as one purchase
+- **Rates for Analysis** — Monthly ECB exchange rates and TÜİK CPI (optional EVDS key) for comparing spending across years in today's lira or in USD
 - **Security** — Fail-closed auth gate, CSRF protection, login rate limiting and security headers for internet-facing deployment
 - **Migration System** — Alembic-managed schema migrations with autogenerate support
 
@@ -33,6 +35,13 @@ expense-analysis/
 │   ├── gmail_client.py     # Gmail API client (global token or per-user token JSON)
 │   ├── gmail_oauth.py      # Web OAuth flow for connecting a user's Gmail
 │   ├── processor.py        # Email processing pipeline (iterates connected users)
+│   ├── backfill.py         # One-off: link existing expenses to statements, in place
+│   ├── analytics/          # Spend dataset for insights
+│   │   ├── dataset.py      # load_spend(): payments out, billed/purchased basis
+│   │   ├── coverage.py     # Which months the imported statements fully cover
+│   │   ├── rates.py        # Monthly FX + CPI, lens conversions
+│   │   ├── merchant.py     # Merchant-name normalization
+│   │   └── months.py       # YYYY-MM helpers
 │   ├── config.py           # Application configuration
 │   └── parsers/
 │       ├── base.py         # Parser interface (BankParser)
@@ -49,6 +58,8 @@ expense-analysis/
 │   ├── backup_tags.py      # Dump tags & rules back to YAML
 │   ├── create_user.py      # Create (or reset) an account
 │   ├── parse_pdf.py        # Debug-parse a single PDF
+│   ├── backfill_statements.py  # Link expenses to statements (dry run by default)
+│   ├── fetch_rates.py      # Fetch monthly FX / CPI into the rates table
 │   └── process.py          # Gmail processor (scheduled)
 │
 ├── data/
@@ -209,6 +220,9 @@ make migrations
 make download-pdfs
 make import-pdfs
 
+# Refresh FX / CPI for the insights
+make fetch-rates
+
 # Start the web UI
 make web
 ```
@@ -232,6 +246,7 @@ make web
 | `make migrations-status` | Show current migration state and history |
 | `make seed` | Seed tags & rules from `data/seeds/tags.yaml` |
 | `make backup-tags` | Dump tags & rules from the DB back to `data/seeds/tags.yaml` |
+| `make fetch-rates` | Fetch monthly FX (and CPI, with `evds_api_key`) into the `rates` table |
 | `make refresh-db` | Full rebuild: backup tags → reset DB → migrate → seed → download → import → retag |
 
 ### Import & Tagging
@@ -241,6 +256,7 @@ make web
 | `make download-pdfs` | Download PDF attachments from Gmail |
 | `make import-pdfs` | Import all PDFs from `data/pdfs/` |
 | `make import-pdfs-clean` | Clear DB and re-import all PDFs |
+| `make backfill-statements [APPLY=1]` | Link existing expenses to their statements and fill installment fields, in place. Dry run unless `APPLY=1`, which first backs up the DB and every tag set to `data/backups/` |
 | `make retag` | Re-tag all expenses using current rules |
 | `make tag-stats` | Show tagging coverage statistics |
 
