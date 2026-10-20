@@ -8,7 +8,9 @@ statement enters the system, every expense is:
 
   * deduplicated against existing rows (date | description | amount | card |
     statement_period | occurrence-within-statement),
-  * stamped with a `statement_period` (from the PDF, or a caller fallback), and
+  * stamped with a `statement_period` (from the PDF, or a caller fallback),
+  * linked to a `Statement` row (card + closing date) and given the
+    installment fields the parser read from the TAKSİT BİLGİSİ column, and
   * returned to the caller so it can be auto-tagged.
 
 Keeping this in one place stops the two paths from drifting apart.  Previously
@@ -19,12 +21,12 @@ on `statement_period IS NOT NULL`) and uncategorised.
 
 import logging
 from collections import Counter
-from datetime import datetime
-from typing import Iterable, List, Optional, Set, Tuple
+from datetime import date, datetime
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 from sqlalchemy.orm import Session
 
-from src.models import Expense
+from src.models import Expense, Statement
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +90,46 @@ def load_fingerprints(db: Session, user_id: int) -> Set[str]:
     return fingerprints
 
 
+def get_or_create_statement(
+    db: Session,
+    *,
+    user_id: int,
+    card_number: str,
+    closing_date: date,
+    currency: str = 'TRY',
+    source_file: Optional[str] = None,
+    email_id: Optional[str] = None,
+) -> Statement:
+    """The user's statement for this card, closing date and currency, created if new.
+
+    A statement re-delivered by a second email resolves to the existing row.
+    The currency is part of the identity because İşbank sends a separate TRY
+    and USD statement for the same card and cycle.
+    """
+    statement = (
+        db.query(Statement)
+        .filter_by(user_id=user_id, card_number=card_number,
+                   closing_date=closing_date, currency=currency)
+        .first()
+    )
+    if statement is None:
+        statement = Statement(
+            user_id=user_id,
+            card_number=card_number,
+            closing_date=closing_date,
+            currency=currency,
+            period=closing_date.strftime('%Y-%m'),
+            source_file=source_file,
+            email_id=email_id,
+        )
+        db.add(statement)
+        # SessionLocal runs with autoflush=False. Flushing here lets the next
+        # PDF in the same batch find this row instead of inserting a duplicate
+        # that would fail the unique constraint at commit.
+        db.flush()
+    return statement
+
+
 def ingest_transactions(
     db: Session,
     transactions: Iterable[dict],
@@ -97,6 +139,8 @@ def ingest_transactions(
     fallback_period: Optional[str] = None,
     fingerprints: Optional[Set[str]] = None,
     dry_run: bool = False,
+    source_file: Optional[str] = None,
+    email_id: Optional[str] = None,
 ) -> Tuple[List[Expense], dict]:
     """Insert parsed transactions, skipping duplicates and non-monetary lines.
 
@@ -111,6 +155,8 @@ def ingest_transactions(
         fingerprints: mutable dedup set. Loaded from the DB (for this user) when
             not supplied. Pass the same set across calls to dedup within a batch.
         dry_run: build/count expenses without adding them to the session.
+        source_file: PDF basename, recorded on a newly created Statement.
+        email_id: Gmail message id, recorded on a newly created Statement.
 
     Returns:
         ``(new_expenses, stats)`` where ``stats`` has the keys ``inserted``,
@@ -127,6 +173,7 @@ def ingest_transactions(
     # its own repeated rows while a re-sent statement still dedups: the re-send
     # numbers its rows 1..n identically and every fingerprint collides.
     occurrences: Counter = Counter()
+    statements: Dict[tuple, Statement] = {}
 
     for tx in transactions:
         # Non-monetary lines (e.g. MaxiPuan point operations) carry no amount.
@@ -151,6 +198,22 @@ def ingest_transactions(
             stats['duplicates'] += 1
             continue
 
+        statement = None
+        closing_date = tx.get('closing_date')
+        if closing_date and not dry_run:
+            key = (tx.get('card_number', ''), closing_date, tx.get('currency', 'TRY'))
+            statement = statements.get(key)
+            if statement is None:
+                statement = statements[key] = get_or_create_statement(
+                    db,
+                    user_id=user_id,
+                    card_number=key[0],
+                    closing_date=closing_date,
+                    currency=key[2],
+                    source_file=source_file,
+                    email_id=email_id,
+                )
+
         expense = Expense(
             user_id=user_id,
             date=tx['date'],
@@ -162,6 +225,10 @@ def ingest_transactions(
             card_number=tx.get('card_number', ''),
             statement_period=period,
             raw_text=tx.get('raw_text'),
+            statement=statement,
+            installment_no=tx.get('installment_no'),
+            installment_count=tx.get('installment_count'),
+            installment_total=tx.get('installment_total'),
         )
         if not dry_run:
             db.add(expense)

@@ -19,7 +19,7 @@ import os
 import re
 from typing import Optional
 from sqlalchemy.orm import Session
-from src.models import Expense, ProcessedEmail
+from src.models import Expense, ProcessedEmail, Statement
 from src.parsers.isbank import IsbankParser
 from src.tag_engine import TagEngine
 from src.ingest import ingest_transactions, load_fingerprints
@@ -124,9 +124,10 @@ def import_pdfs(
                 ExpenseTag.expense_id.in_(user_expense_ids)
             ).delete(synchronize_session=False)
         deleted = db.query(Expense).filter_by(user_id=user_id).delete()
+        db.query(Statement).filter_by(user_id=user_id).delete()
         db.query(ProcessedEmail).filter_by(user_id=user_id).delete()
         db.commit()
-        logger.info(f"Cleared {deleted} existing expenses, their tags, and processed email records")
+        logger.info(f"Cleared {deleted} existing expenses, their tags, statements, and processed email records")
 
     # Load message IDs imported in PRIOR runs (SUCCESS only) for this user. Used
     # solely to skip re-parsing PDFs we've already imported — it is NOT updated
@@ -186,6 +187,8 @@ def import_pdfs(
                 fallback_period=filename_period,
                 fingerprints=existing_fingerprints,
                 dry_run=dry_run,
+                source_file=basename,
+                email_id=email_id,
             )
             new_expenses.extend(new)
             stats['new_inserted'] += ing['inserted']

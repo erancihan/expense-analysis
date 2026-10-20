@@ -191,6 +191,8 @@ class ExpenseProcessor:
                             user_id=user_id,
                             bank_source=bank_id,
                             fingerprints=fingerprints,
+                            source_file=part['filename'],
+                            email_id=message_id,
                         )
                         new_expenses.extend(new)
 

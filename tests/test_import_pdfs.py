@@ -7,13 +7,13 @@ card's transactions.
 """
 
 import unittest
-from datetime import datetime
+from datetime import date, datetime
 from unittest.mock import patch
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from src.models import Base, Expense, ProcessedEmail, User
+from src.models import Base, Expense, ProcessedEmail, Statement, User
 from src.import_pdfs import import_pdfs, parse_pdf_filename
 
 
@@ -186,6 +186,38 @@ class ImportPdfsTestCase(unittest.TestCase):
 
         self.assertEqual(stats['new_inserted'], 1)
         self.assertEqual(self.db.query(Expense).one().user_id, self.uid)
+
+    @patch('src.import_pdfs.IsbankParser')
+    @patch('src.import_pdfs.glob.glob')
+    def test_records_statement_source_file_and_email(self, mock_glob, MockParser):
+        f1 = '/d/bank(isbank),date(2026-04-08),emailid(MSG1),card(1111).pdf'
+        mock_glob.side_effect = lambda pat: [f1] if 'bank(' in pat else []
+        tx = _tx('ACME MARKET', 10.0, '1111')
+        tx['closing_date'] = date(2026, 4, 7)
+        MockParser.return_value.extract_transactions.return_value = [tx]
+
+        import_pdfs(self.db, user_id=self.uid)
+
+        statement = self.db.query(Statement).one()
+        self.assertEqual(statement.source_file, 'bank(isbank),date(2026-04-08),emailid(MSG1),card(1111).pdf')
+        self.assertEqual(statement.email_id, 'MSG1')
+        self.assertEqual(self.db.query(Expense).one().statement_id, statement.id)
+
+    @patch('src.import_pdfs.IsbankParser')
+    @patch('src.import_pdfs.glob.glob')
+    def test_clear_also_removes_statements(self, mock_glob, MockParser):
+        self.db.add(Statement(user_id=self.uid, card_number='9999', closing_date=date(2020, 1, 5),
+                              period='2020-01', source_file='old.pdf'))
+        self.db.commit()
+        # One PDF with no transactions: import_pdfs returns before the clear
+        # block when it finds no PDFs at all (src/import_pdfs.py:110-112).
+        f1 = '/d/bank(isbank),date(2026-04-08),emailid(MSG1),card(1111).pdf'
+        mock_glob.side_effect = lambda pat: [f1] if 'bank(' in pat else []
+        MockParser.return_value.extract_transactions.return_value = []
+
+        import_pdfs(self.db, user_id=self.uid, clear=True)
+
+        self.assertEqual(self.db.query(Statement).count(), 0)
 
 
 if __name__ == '__main__':
