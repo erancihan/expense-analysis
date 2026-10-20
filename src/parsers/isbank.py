@@ -22,7 +22,7 @@ Usage:
 
 from .base import BankParser
 from typing import List, Dict, Any, Optional, Tuple
-from datetime import datetime
+from datetime import date, datetime
 from io import BytesIO
 import re
 import logging
@@ -54,6 +54,15 @@ CARD_NUMBER_PATTERN = re.compile(r'(\d{4}\*{4,8}\d{4})')
 
 # Card type from "<TYPE> Hesap Özetiniz"
 CARD_TYPE_PATTERN = re.compile(r'^(.+?)\s+Hesap Özetiniz$')
+
+# Statement closing date. The header prints it as "Hesap Kesim Tarihi:" with a
+# DD.MM.YYYY value on the same row.
+CLOSING_DATE_LABEL = 'Hesap Kesim Tarihi'
+DOTTED_DATE_PATTERN = re.compile(r'(\d{2})\.(\d{2})\.(\d{4})')
+
+# TAKSİT BİLGİSİ column: "2/4 taksidi (11.323,24)" is installment 2 of 4 of an
+# 11.323,24 purchase.
+INSTALLMENT_PATTERN = re.compile(r'(\d+)/(\d+)\s+taksidi\s+\(([\d.,]+)\)')
 
 # ── Section markers ──────────────────────────────────────────────────────────
 PREV_BALANCE_MARKER = 'ÖNCEKİ HESAP ÖZETİ BAKİYENİZ'
@@ -135,6 +144,17 @@ def _extract_amount_values(text: str) -> List[float]:
     return values
 
 
+def _parse_installment(text: str) -> Optional[Tuple[int, int, float]]:
+    """(installment_no, installment_count, total) from TAKSİT BİLGİSİ text."""
+    match = INSTALLMENT_PATTERN.search(text)
+    if not match:
+        return None
+    total = _normalise_amount(match.group(3))
+    if total is None:
+        return None
+    return int(match.group(1)), int(match.group(2)), total
+
+
 def _extract_card_metadata(all_text: str) -> Dict[str, str]:
     """
     Extract card number and card type from the full text of a statement.
@@ -186,10 +206,12 @@ def _extract_card_metadata(all_text: str) -> Dict[str, str]:
         if 'Hesap Özeti Borcu' in line:
             # Search full text for standalone "AMOUNT CURRENCY" lines
             # (e.g. "709,85 USD").  Use end-of-line anchor to avoid matching
-            # transaction descriptions like "28 GBP SATIŞ".
+            # transaction descriptions like "28 GBP SATIŞ".  A credit balance
+            # carries a sign ("+11,58 USD"), and the minimum-payment value can
+            # be starred ("+*0,00 USD").
             for currency_line in all_text.split('\n'):
                 currency_match = re.match(
-                    r'^[\d.,]+\s+(USD|EUR|GBP)$', currency_line.strip()
+                    r'^[+-]?\*?[\d.,]+\s+(USD|EUR|GBP)$', currency_line.strip()
                 )
                 if currency_match:
                     meta['statement_currency'] = currency_match.group(1)
@@ -198,6 +220,45 @@ def _extract_card_metadata(all_text: str) -> Dict[str, str]:
         prev_line = line
 
     return meta
+
+
+def _dotted_date(match: 're.Match') -> Optional[date]:
+    """A DD.MM.YYYY regex match as a date, or None if it is not a real date."""
+    try:
+        return date(int(match.group(3)), int(match.group(2)), int(match.group(1)))
+    except ValueError:
+        return None
+
+
+def _find_closing_date(
+    raw_lines: List[Tuple[float, float, float, str]], tolerance: float,
+) -> Optional[date]:
+    """The statement's closing date: the value printed on the label's own row.
+
+    The header prints four label/value pairs in a two-column block — Hesap Kesim
+    Tarihi, Son Ödeme Tarihi, and the "Bir Sonraki …" version of each. pdfminer
+    does not always emit them in reading order: in the 2021 layout the *next*
+    closing date came out first, so _extract_card_metadata, which takes the
+    first date in the text, filed those statements one month late. A label and
+    its value share a baseline (within a point in every layout seen), so they
+    are paired by position, the same way amounts are matched to rows.
+    """
+    for x0, _x1, top, text in raw_lines:
+        if CLOSING_DATE_LABEL not in text or 'Sonraki' in text:
+            continue
+        inline = DOTTED_DATE_PATTERN.search(text)
+        if inline:
+            return _dotted_date(inline)
+        best = None
+        for value_x0, _value_x1, value_top, value_text in raw_lines:
+            match = DOTTED_DATE_PATTERN.fullmatch(value_text.strip())
+            distance = abs(value_top - top)
+            if (match and value_x0 > x0 and distance <= tolerance
+                    and (best is None or distance < best[0])):
+                best = (distance, match)
+        if best:
+            return _dotted_date(best[1])
+    return None
 
 
 class IsbankParser(BankParser):
@@ -283,6 +344,7 @@ class IsbankParser(BankParser):
         # ── Step 2: Classify lines by column ──────────────────────────────────
         desc_lines: List[Dict[str, Any]] = []      # {top, text}
         amount_map: Dict[float, float] = {}         # top → amount value
+        installment_map: Dict[float, Tuple[int, int, float]] = {}  # top → (n, N, total)
         all_text_parts: List[str] = []
 
         for x0, x1, top, text in raw_lines:
@@ -297,6 +359,13 @@ class IsbankParser(BankParser):
                     val = _normalise_amount(text)
                     if val is not None:
                         amount_map[top] = val
+            else:
+                # TAKSİT BİLGİSİ column. Matched by content, not x-position:
+                # the column drifts between ~400 and ~450pt across layouts,
+                # and the pattern appears nowhere else on the page.
+                installment = _parse_installment(text)
+                if installment is not None:
+                    installment_map[top] = installment
 
         # Sort desc lines by vertical position (document order)
         desc_lines.sort(key=lambda d: d['top'])
@@ -305,6 +374,14 @@ class IsbankParser(BankParser):
         full_text = '\n'.join(all_text_parts)
         card_meta = _extract_card_metadata(full_text)
         default_currency = card_meta.get('statement_currency', 'TRY')
+        # The period comes from the closing date on the label's own row; the
+        # text-based guess in card_meta is only a fallback for layouts where
+        # no label/value pair is found.
+        closing_date = _find_closing_date(raw_lines, self.POSITION_TOLERANCE)
+        statement_period = (
+            closing_date.strftime('%Y-%m') if closing_date
+            else card_meta.get('statement_period', '')
+        )
 
         # ── Step 3: Walk desc lines and match amounts by position ─────────────
         transactions: List[Dict[str, Any]] = []
@@ -364,6 +441,7 @@ class IsbankParser(BankParser):
 
                 # Look up amount by position (±tolerance)
                 amount = self._find_amount_at_position(line_top, amount_map)
+                installment = self._find_at_position(line_top, installment_map)
 
                 is_payment = PAYMENT_MARKER in desc
 
@@ -375,7 +453,11 @@ class IsbankParser(BankParser):
                     'category': 'Payment' if is_payment else 'Uncategorized',
                     'card_number': card_meta.get('card_number', ''),
                     'card_type': card_meta.get('card_type', ''),
-                    'statement_period': card_meta.get('statement_period', ''),
+                    'statement_period': statement_period,
+                    'closing_date': closing_date,
+                    'installment_no': installment[0] if installment else None,
+                    'installment_count': installment[1] if installment else None,
+                    'installment_total': installment[2] if installment else None,
                     'raw_text': f"{date_str} {desc} {amount}",
                 })
             else:
@@ -390,6 +472,21 @@ class IsbankParser(BankParser):
 
         return transactions
 
+    def _find_at_position(self, target_top: float, value_map: Dict[float, Any]) -> Any:
+        """The value at the same vertical position (within tolerance), or None."""
+        best_val = None
+        best_dist = self.POSITION_TOLERANCE + 1  # start beyond tolerance
+
+        for top, val in value_map.items():
+            dist = abs(top - target_top)
+            if dist < best_dist:
+                best_dist = dist
+                best_val = val
+
+        if best_dist <= self.POSITION_TOLERANCE:
+            return best_val
+        return None
+
     def _find_amount_at_position(
         self, target_top: float, amount_map: Dict[float, float]
     ) -> Optional[float]:
@@ -398,17 +495,6 @@ class IsbankParser(BankParser):
         Returns the amount value if found, or None if no TUTAR value exists at
         this row position.
         """
-        best_val = None
-        best_dist = self.POSITION_TOLERANCE + 1  # start beyond tolerance
-
-        for amt_top, amt_val in amount_map.items():
-            dist = abs(amt_top - target_top)
-            if dist < best_dist:
-                best_dist = dist
-                best_val = amt_val
-
-        if best_dist <= self.POSITION_TOLERANCE:
-            return best_val
-        return None
+        return self._find_at_position(target_top, amount_map)
 
 
