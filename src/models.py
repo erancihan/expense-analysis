@@ -1,5 +1,5 @@
 from sqlalchemy import (
-    Column, Integer, String, Float, DateTime, Text, Boolean,
+    Column, Integer, String, Float, Date, DateTime, Text, Boolean,
     ForeignKey, UniqueConstraint, create_engine, TypeDecorator,
 )
 from sqlalchemy.orm import declarative_base, relationship
@@ -91,13 +91,55 @@ class Expense(Base):
     card_number = Column(String, nullable=True)
     statement_period = Column(String, nullable=True)  # YYYY-MM from source PDF
     raw_text = Column(Text, nullable=True)
+    # The statement this row was parsed from (NULL for rows imported before
+    # statements were recorded and not yet backfilled).
+    statement_id = Column(Integer, ForeignKey('statements.id'), nullable=True, index=True)
+    # From the statement's TAKSİT BİLGİSİ column, "n/N taksidi (total)":
+    # installment n of N of a purchase whose full amount is installment_total.
+    installment_no = Column(Integer, nullable=True)
+    installment_count = Column(Integer, nullable=True)
+    installment_total = Column(Float, nullable=True)
     created_at = Column(DateTime, default=utc_now)
 
     # Many-to-many relationship with Tag through ExpenseTag
     expense_tags = relationship('ExpenseTag', back_populates='expense', cascade='all, delete-orphan')
+    statement = relationship('Statement', back_populates='expenses')
 
     def __repr__(self):
         return f"<Expense(date='{self.date}', description='{self.description}', amount={self.amount})>"
+
+
+class Statement(Base):
+    """One imported card statement (one PDF).
+
+    closing_date is the "Hesap Kesim Tarihi"; period is its YYYY-MM. Coverage
+    analysis uses the closing dates to find statements that were never
+    imported.
+    """
+    __tablename__ = 'statements'
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
+    card_number = Column(String, nullable=False)
+    closing_date = Column(Date, nullable=False)
+    # İşbank sends one statement per currency for the same card and cycle, so
+    # a TRY and a USD statement share card_number and closing_date.
+    currency = Column(String(3), nullable=False, default='TRY')
+    period = Column(String(7), nullable=False)
+    source_file = Column(String, nullable=True)
+    email_id = Column(String, nullable=True)
+    imported_at = Column(DateTime, default=utc_now)
+
+    expenses = relationship('Expense', back_populates='statement')
+
+    # A statement re-delivered by a second email is the same statement.
+    __table_args__ = (
+        UniqueConstraint('user_id', 'card_number', 'closing_date', 'currency',
+                         name='uq_statements_user_card_closing_currency'),
+    )
+
+    def __repr__(self):
+        return f"<Statement(card='{self.card_number}', closing_date='{self.closing_date}')>"
 
 
 class Tag(Base):
@@ -232,3 +274,20 @@ class ProcessedEmail(Base):
     def __repr__(self):
         return f"<ProcessedEmail(message_id='{self.message_id}', status='{self.status}')>"
 
+
+
+class Rate(Base):
+    """Monthly macro series (USDTRY, EURTRY, CPI_TR) — see src/analytics/rates.py.
+
+    Public figures shared by every user, so there is no user_id. provisional
+    marks a month copied forward from the last published value.
+    """
+    __tablename__ = 'rates'
+
+    series = Column(String, primary_key=True)
+    month = Column(String(7), primary_key=True)   # YYYY-MM
+    value = Column(Float, nullable=False)
+    provisional = Column(Boolean, default=False, nullable=False)
+
+    def __repr__(self):
+        return f"<Rate(series='{self.series}', month='{self.month}', value={self.value})>"
