@@ -202,15 +202,30 @@ public repo). Five sub-projects, each with its own spec → plan → build cycle
 0 foundation, 1 page shell + "Am I spending more?", 2 "What's locked in?",
 3 "Where does it go?", 4 "What's unusual?".
 
-**0 — Foundation**
-- [ ] Parser reads the closing date from the label's own row (it took the first
+**0 — Foundation** ✅ *(done 2026-10-20, except the CPI lens)*
+- [x] Parser reads the closing date from the label's own row (it took the first
       date in the text, which filed some 2021-era statements a month late) and
-      the TAKSİT BİLGİSİ installment column.
-- [ ] `statements` table; `expenses.statement_id` + `installment_*`; `rates` table.
-- [ ] Backfill applied to the real data in place (no insert/delete/retag; tag
-      sets verified identical).
-- [ ] `src/analytics/`: months, coverage, merchant normalization, rates, `load_spend`.
-- [ ] `make fetch-rates` run; CPI live-checked once an EVDS key exists.
+      the TAKSİT BİLGİSİ installment column. Also accepts a signed foreign
+      balance (`+11,58 USD`), which had made one USD statement parse as TRY.
+- [x] `statements` table (card + closing date + **currency**: İşbank issues a
+      separate TRY and USD statement per cycle, and keying without currency
+      made eight USD statements look like re-deliveries);
+      `expenses.statement_id` + `installment_*`; `rates` table.
+- [x] Backfill applied to the real data in place *(2026-10-20)* — 132
+      statements, 4362/4362 rows matched, 0 unmatched either way, 57 period
+      corrections (2021-12→2021-11, 2022-03→2022-02, 2022-05→2022-04), 2
+      currency corrections, 167 rows with installment info. No insert, delete
+      or retag; tag sets verified identical before and after (8498 links).
+- [x] `src/analytics/`: months, coverage, merchant normalization, rates,
+      `load_spend`. 232 tests pass.
+- [~] `make fetch-rates` run — FX (USDTRY, EURTRY) stored for 91 months.
+      **CPI still pending:** needs a free EVDS key in `evds_api_key`, so the
+      "today's lira" lens is unavailable and only the USD lens works.
+
+Coverage on the real data reports six incomplete months, each a genuinely
+missing statement: 2022-12, 2023-07, 2023-11, 2024-03, 2025-07, 2026-05. The
+months the period bug used to distort (2021-11, 2022-02, 2022-04) now read as
+complete.
 
 Mark items done only after checking them against the code, a test run, or the
 backfill report — not against this file.
