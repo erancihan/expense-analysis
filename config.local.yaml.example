@@ -29,6 +29,10 @@
 # exchange_rates:
 #   USD: 34.0
 #   EUR: 37.0
+# EVDS (TCMB) API key — enables the CPI "today's lira" lens on the Insights
+# page. Free from https://evds3.tcmb.gov.tr. Without it `make fetch-rates`
+# fetches FX only (USD lens still works).
+# evds_api_key: "REPLACE_WITH_YOUR_EVDS_KEY"
 
 # bank_config:
 #   isbank:
