@@ -10,6 +10,7 @@ A personal expense tracker that parses İşbank credit card statement PDFs, cate
 - **Web Dashboard** — Single-page app with ECharts graphs, filterable expense table, and tag management
 - **Multi-User** — Password accounts with fully isolated expenses, tags, rules and budgets per user
 - **Budgets** — Per-tag and overall monthly limits with spent/limit progress on the dashboard
+- **Insights** — A separate `/insights` page: "Am I spending more?" with monthly and annual spend in nominal lira, today's lira (needs CPI) or USD, rolling averages, a quarterly category mix and a year-over-year table. Months with a missing statement are shown as incomplete, never as zero
 - **CSV Export** — Downloads the current filtered view; text fields are formula-injection-safe
 - **Cross-Currency Totals** — Configurable exchange rates produce a TRY-equivalent grand total alongside per-currency figures
 - **Statements & Installments** — Every import records its statement (card + closing date) and the installment column (`n/N` and the full purchase amount), so missing statements are detectable and installment plans can be seen as one purchase
@@ -25,8 +26,9 @@ expense-analysis/
 │   ├── models.py           # SQLAlchemy ORM models (User, Expense, Tag, TagRule, Budget, …)
 │   ├── database.py         # Engine & session factory (DATABASE_URL from src.config)
 │   ├── web.py              # Flask app & REST API
+│   ├── insights_api.py     # Read-only /api/insights/* blueprint
 │   ├── auth.py             # Login/logout routes, auth gate helpers
-│   ├── extensions.py       # Unbound Flask extensions (CSRF, rate limiter)
+│   ├── extensions.py       # Unbound Flask extensions (CSRF, rate limiter, with_db)
 │   ├── users.py            # Owner resolution for CLI / ingestion entry points
 │   ├── seeding.py          # Per-user default tag & rule seeding
 │   ├── ingest.py           # Shared transaction ingestion (dedup, statement_period)
@@ -41,6 +43,7 @@ expense-analysis/
 │   │   ├── coverage.py     # Which months the imported statements fully cover
 │   │   ├── rates.py        # Monthly FX + CPI, lens conversions
 │   │   ├── merchant.py     # Merchant-name normalization
+│   │   ├── trend.py        # "Am I spending more?" maths
 │   │   └── months.py       # YYYY-MM helpers
 │   ├── config.py           # Application configuration
 │   └── parsers/
@@ -75,11 +78,14 @@ expense-analysis/
 │
 ├── templates/              # Jinja2 templates
 │   ├── index.html          # Dashboard shell (Alpine.js, ECharts, TailwindCSS)
+│   ├── insights.html       # Insights page shell
 │   ├── login.html          # Login page
-│   └── partials/           # Header, stats, chart, expenses, budgets, modals
+│   └── partials/           # Shared head and nav, dashboard sections, modals;
+│                           # insights/ holds the insights page sections
 │
 ├── static/
-│   └── app.js              # Dashboard front-end logic (Alpine component)
+│   ├── app.js              # Dashboard front-end logic (Alpine component)
+│   └── insights.js         # Insights page logic (Alpine component)
 │
 ├── tests/                  # unittest suite
 ├── secrets/                # Gmail OAuth credentials & token (gitignored)
@@ -374,6 +380,13 @@ like any other.
 | GET | `/api/budgets` | List budgets (the overall budget first) |
 | POST | `/api/budgets` | Upsert a budget — `{tag_id, amount}`; `tag_id: null` means overall |
 | DELETE | `/api/budgets/:id` | Delete a budget |
+
+### Insights
+
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/insights/meta` | Available lenses, statement coverage per month, rate freshness, tag colours |
+| GET | `/api/insights/trend` | Monthly/annual totals, rolling averages, category mix and year-over-year for `lens`, `basis`, `from`, `to` (`YYYY-MM`) and optional `parent` |
 
 ### Gmail connection
 

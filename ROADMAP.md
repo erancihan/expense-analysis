@@ -21,7 +21,7 @@ each user has isolated expenses and connects their own Gmail.
 - [x] **Phase 3 — Tests & CI** *(parser/tag-engine/auth tests done; CI green on GitHub since 2026-08-05; fixture-based parser integration test added 2026-08-05)*
 - [~] **Phase 4 — Features** *(CSV export, budgets, cross-currency done; strict-CSP + extra bank parsers remain)*
 - [~] **Phase 5 — Docs accuracy** *(README synced to code 2026-08-05; ROADMAP audit ongoing)*
-- [~] **Phase 6 — Insights** *(foundation code in progress; see the Phase 6 section)*
+- [~] **Phase 6 — Insights** *(foundation + trend panel done; "What's locked in?" next)*
 
 ---
 
@@ -226,6 +226,20 @@ Coverage on the real data reports six incomplete months, each a genuinely
 missing statement: 2022-12, 2023-07, 2023-11, 2024-03, 2025-07, 2026-05. The
 months the period bug used to distort (2021-11, 2022-02, 2022-04) now read as
 complete.
+
+**1 — Page shell + "Am I spending more?"** ✅ *(done 2026-10-26)*
+- [x] `/insights` page with lens / basis / range controls mirrored in the query
+      string; Dashboard | Insights navigation shared through `_nav.html`.
+- [x] `src/analytics/trend.py` (pure) + `src/insights_api.py` (`/api/insights/meta`,
+      `/trend`; GET, user-scoped). Uncovered months: `incomplete` muted,
+      `none` as a gap; rolling averages and YoY/KPI comparisons use complete
+      months only, pairing each month with the same month a year earlier.
+- [x] Panel: KPI tiles, monthly bars + 3/12-month averages, annual totals (YTD
+      flagged), quarterly category mix with drill-down, YoY table. 274 tests
+      pass; checked in a browser against the real data (lens/basis/range
+      switching, drill-down and back, legend toggle, dashboard unaffected).
+- [ ] The today's-lira lens stays disabled until `evds_api_key` is set and
+      `make fetch-rates` has stored CPI.
 
 Mark items done only after checking them against the code, a test run, or the
 backfill report — not against this file.
