@@ -1,0 +1,26 @@
+<!-- Error banner, empty state and the three headline figures. -->
+<div x-show="error" class="mb-6 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300" x-text="error"></div>
+
+<div x-show="meta && !hasData" class="glass-card rounded-2xl p-10 mb-6 text-center text-slate-400">
+    No statements imported yet.
+</div>
+
+<div x-show="hasData && trend" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+    <div class="glass-card rounded-xl p-4">
+        <p class="text-xs text-slate-400 uppercase tracking-wider font-medium">Last 12 months vs prior 12</p>
+        <p class="text-3xl font-bold mt-1" :class="pctClass(trend && trend.kpis.last12_vs_prior12_pct)"
+           x-text="fmtPct(trend && trend.kpis.last12_vs_prior12_pct)"></p>
+        <p class="text-xs text-slate-500 mt-1">over <span x-text="trend ? trend.kpis.months_compared : 0"></span> comparable months</p>
+    </div>
+    <div class="glass-card rounded-xl p-4">
+        <p class="text-xs text-slate-400 uppercase tracking-wider font-medium">Average month</p>
+        <p class="text-3xl font-bold text-amber-400 mt-1" x-text="fmt(trend && trend.kpis.avg_monthly)"></p>
+        <p class="text-xs text-slate-500 mt-1">complete months in range · <span x-text="lensLabel"></span></p>
+    </div>
+    <div class="glass-card rounded-xl p-4">
+        <p class="text-xs text-slate-400 uppercase tracking-wider font-medium">Year to date vs last year</p>
+        <p class="text-3xl font-bold mt-1" :class="pctClass(trend && trend.kpis.ytd_vs_prior_ytd_pct)"
+           x-text="fmtPct(trend && trend.kpis.ytd_vs_prior_ytd_pct)"></p>
+        <p class="text-xs text-slate-500 mt-1">same months, a year apart</p>
+    </div>
+</div>

@@ -1,22 +1,40 @@
-<!-- Monthly spending chart with range selector -->
+<!-- Monthly spending chart with period navigation and range selector -->
 <section class="glass-card rounded-2xl p-6 mb-8">
-    <div class="flex items-center justify-between mb-4">
+    <div class="flex items-center justify-between flex-wrap gap-3 mb-4">
         <h2 class="text-lg font-semibold text-slate-200">Monthly Spending</h2>
-        <!-- Chart Range Selector -->
-        <div class="flex items-center rounded-lg border border-slate-700/50 overflow-hidden text-xs font-medium">
-            <button @click="setChartRange('1m')"
-                    :class="chartRange === '1m' ? 'bg-indigo-600 text-white' : 'bg-slate-800/60 text-slate-400 hover:text-slate-200 hover:bg-slate-700/50'"
-                    class="px-3 py-1.5 transition-colors">Month</button>
-            <button @click="setChartRange('1y')"
-                    :class="chartRange === '1y' ? 'bg-indigo-600 text-white' : 'bg-slate-800/60 text-slate-400 hover:text-slate-200 hover:bg-slate-700/50'"
-                    class="px-3 py-1.5 transition-colors border-l border-slate-700/50">Year</button>
-            <button @click="setChartRange('2y')"
-                    :class="chartRange === '2y' ? 'bg-indigo-600 text-white' : 'bg-slate-800/60 text-slate-400 hover:text-slate-200 hover:bg-slate-700/50'"
-                    class="px-3 py-1.5 transition-colors border-l border-slate-700/50">2 Years</button>
-            <button @click="setChartRange('5y')"
-                    :class="chartRange === '5y' ? 'bg-indigo-600 text-white' : 'bg-slate-800/60 text-slate-400 hover:text-slate-200 hover:bg-slate-700/50'"
-                    class="px-3 py-1.5 transition-colors border-l border-slate-700/50">5 Years</button>
+        <div class="flex items-center gap-3 flex-wrap">
+            <!-- Last period on the chart. Moves only the chart window; the
+                 expense list follows a click on a bar instead. -->
+            <div class="flex items-center rounded-lg border border-slate-700/50 bg-slate-800/60 text-xs font-medium">
+                <button @click="shiftStatementMonth(-1)" title="Previous Month"
+                        class="px-2 py-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-700/50 rounded-l-lg transition-colors focus:outline-none">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
+                </button>
+                <input type="month" x-model="statementMonth" :max="maxStatementMonth"
+                       @change="setStatementMonth($event.target.value)" title="Last month shown on the chart"
+                       class="bg-transparent px-1 py-1.5 w-32 text-center text-slate-200 focus:outline-none border-x border-slate-700/50">
+                <button @click="shiftStatementMonth(1)" :disabled="!canShiftStatementForward" title="Next Month"
+                        class="px-2 py-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-700/50 rounded-r-lg transition-colors focus:outline-none disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-slate-400">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+                </button>
+            </div>
+            <!-- Chart Range Selector -->
+            <div class="flex items-center rounded-lg border border-slate-700/50 overflow-hidden text-xs font-medium">
+                <button @click="setChartRange('1m')"
+                        :class="chartRange === '1m' ? 'bg-indigo-600 text-white' : 'bg-slate-800/60 text-slate-400 hover:text-slate-200 hover:bg-slate-700/50'"
+                        class="px-3 py-1.5 transition-colors">Month</button>
+                <button @click="setChartRange('1y')"
+                        :class="chartRange === '1y' ? 'bg-indigo-600 text-white' : 'bg-slate-800/60 text-slate-400 hover:text-slate-200 hover:bg-slate-700/50'"
+                        class="px-3 py-1.5 transition-colors border-l border-slate-700/50">Year</button>
+                <button @click="setChartRange('2y')"
+                        :class="chartRange === '2y' ? 'bg-indigo-600 text-white' : 'bg-slate-800/60 text-slate-400 hover:text-slate-200 hover:bg-slate-700/50'"
+                        class="px-3 py-1.5 transition-colors border-l border-slate-700/50">2 Years</button>
+                <button @click="setChartRange('5y')"
+                        :class="chartRange === '5y' ? 'bg-indigo-600 text-white' : 'bg-slate-800/60 text-slate-400 hover:text-slate-200 hover:bg-slate-700/50'"
+                        class="px-3 py-1.5 transition-colors border-l border-slate-700/50">5 Years</button>
+            </div>
         </div>
     </div>
+    <p class="mb-3 text-slate-500 text-xs">Click a month to list its expenses below.</p>
     <div id="monthlyChart" class="w-full" style="height: 380px;"></div>
 </section>

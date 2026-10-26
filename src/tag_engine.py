@@ -26,6 +26,7 @@ class TagEngine:
         self.db = db
         self.user_id = user_id
         self._rules: Optional[List[TagRule]] = None
+        self._parents: Optional[dict] = None
 
     @property
     def rules(self) -> List[TagRule]:
@@ -39,9 +40,24 @@ class TagEngine:
             )
         return self._rules
 
+    def _parent_of(self, tag_id: int) -> Optional[int]:
+        """tag_id -> parent tag id (or None). Cached for the engine's lifetime.
+
+        apply_rules runs over thousands of expenses, so this must not be a query
+        per row.
+        """
+        if self._parents is None:
+            self._parents = {
+                t.id: t.parent_id
+                for t in self.db.query(Tag.id, Tag.parent_id)
+                             .filter(Tag.user_id == self.user_id).all()
+            }
+        return self._parents.get(tag_id)
+
     def invalidate_cache(self):
         """Clear the cached rules (call after rules are added/modified)."""
         self._rules = None
+        self._parents = None
 
     def match_expense(self, expense: Expense) -> List[TagRule]:
         """
@@ -130,16 +146,29 @@ class TagEngine:
             }
 
             matches = self.match_expense(expense)
+
+            # Collect the tags to apply: each matched child plus its parent.
+            # Both levels are stored so that filtering by a parent needs no
+            # query change. A set is what keeps two children of the same parent
+            # from producing two parent rows.
+            wanted = set()
             for rule in matches:
-                if rule.tag_id in existing:
+                wanted.add(rule.tag_id)
+                parent_id = self._parent_of(rule.tag_id)
+                if parent_id is not None:
+                    wanted.add(parent_id)
+
+            for tag_id in wanted:
+                if tag_id in existing:
                     continue  # already tagged (auto or manual)
 
                 et = ExpenseTag(
                     expense_id=expense.id,
-                    tag_id=rule.tag_id,
+                    tag_id=tag_id,
                     source='auto',
                 )
                 self.db.add(et)
+                existing[tag_id] = 'auto'
                 applied += 1
 
         self.db.commit()

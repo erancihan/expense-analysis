@@ -1,7 +1,14 @@
 <!-- Expenses table with filters, card tabs, pagination -->
 <section class="glass-card rounded-2xl p-6 mb-8">
     <div class="flex items-center justify-between flex-wrap gap-4 mb-4">
-        <h2 class="text-lg font-semibold text-slate-200">Expenses</h2>
+        <!-- The period comes from the chart, not the header navigation. -->
+        <div class="flex items-baseline gap-3">
+            <h2 class="text-lg font-semibold text-slate-200">Expenses</h2>
+            <span x-show="selectedPeriod" class="text-sm text-slate-400">
+                <span class="font-medium text-indigo-300" x-text="selectedPeriod"></span>
+                · <span x-text="actualDateFrom + ' → ' + actualDateTo"></span>
+            </span>
+        </div>
 
         <!-- Filters -->
         <div class="flex items-center gap-3 flex-wrap">
@@ -11,9 +18,17 @@
 
             <select x-model="filterTag" @change="fetchExpenses()"
                     class="bg-slate-800/60 border border-slate-700 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+                <!-- Grouped by parent. Selecting a parent matches all its
+                     children server-side, because both levels are stored on
+                     every expense. -->
                 <option value="">All Tags</option>
-                <template x-for="tag in tags" :key="tag.id">
-                    <option :value="tag.name" x-text="tag.icon + ' ' + tag.name"></option>
+                <template x-for="p in tags.filter(t => !t.parent_id)" :key="p.id">
+                    <optgroup :label="p.icon + ' ' + p.name">
+                        <option :value="p.name" x-text="'all ' + p.name"></option>
+                        <template x-for="c in tags.filter(t => t.parent_id === p.id)" :key="c.id">
+                            <option :value="c.name" x-text="'   ' + c.icon + ' ' + c.name"></option>
+                        </template>
+                    </optgroup>
                 </template>
             </select>
 
@@ -45,12 +60,35 @@
     <div class="overflow-x-auto">
         <table class="w-full text-sm">
             <thead>
+                <!-- Sorting is server-side: the list is paginated, so sorting in
+                     the browser would only reorder the page on screen. -->
                 <tr class="border-b border-slate-700/50">
-                    <th class="text-left py-3 px-3 text-xs text-slate-400 uppercase tracking-wider font-medium">Date</th>
-                    <th class="text-left py-3 px-3 text-xs text-slate-400 uppercase tracking-wider font-medium">Description</th>
-                    <th class="text-right py-3 px-3 text-xs text-slate-400 uppercase tracking-wider font-medium">Amount</th>
-                    <th class="text-left py-3 px-3 text-xs text-slate-400 uppercase tracking-wider font-medium">Tags</th>
-                    <th class="text-left py-3 px-3 text-xs text-slate-400 uppercase tracking-wider font-medium">Card</th>
+                    <th class="text-left py-3 px-3 text-xs text-slate-400 uppercase tracking-wider font-medium">
+                        <button @click="setSort('date')" class="inline-flex items-center gap-1 uppercase tracking-wider hover:text-slate-200 transition-colors">
+                            Date <span class="text-indigo-400" x-text="sortIndicator('date')"></span>
+                        </button>
+                    </th>
+                    <th class="text-left py-3 px-3 text-xs text-slate-400 uppercase tracking-wider font-medium">
+                        <button @click="setSort('description')" class="inline-flex items-center gap-1 uppercase tracking-wider hover:text-slate-200 transition-colors">
+                            Description <span class="text-indigo-400" x-text="sortIndicator('description')"></span>
+                        </button>
+                    </th>
+                    <th class="text-right py-3 px-3 text-xs text-slate-400 uppercase tracking-wider font-medium">
+                        <button @click="setSort('amount')" class="inline-flex items-center gap-1 uppercase tracking-wider hover:text-slate-200 transition-colors">
+                            Amount <span class="text-indigo-400" x-text="sortIndicator('amount')"></span>
+                        </button>
+                    </th>
+                    <th class="text-left py-3 px-3 text-xs text-slate-400 uppercase tracking-wider font-medium">
+                        <button @click="setSort('tag')" title="Orders by parent category, then child tag"
+                                class="inline-flex items-center gap-1 uppercase tracking-wider hover:text-slate-200 transition-colors">
+                            Tags <span class="text-indigo-400" x-text="sortIndicator('tag')"></span>
+                        </button>
+                    </th>
+                    <th class="text-left py-3 px-3 text-xs text-slate-400 uppercase tracking-wider font-medium">
+                        <button @click="setSort('card')" class="inline-flex items-center gap-1 uppercase tracking-wider hover:text-slate-200 transition-colors">
+                            Card <span class="text-indigo-400" x-text="sortIndicator('card')"></span>
+                        </button>
+                    </th>
                     <th class="py-3 px-3 w-10"></th>
                 </tr>
             </thead>

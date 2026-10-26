@@ -1,121 +1,253 @@
-# Tag Defaults Configuration
+# Tag defaults — example.
 #
-# This file defines the default tags and matching rules for auto-categorizing
-# expenses. Copy this to data/tag_defaults.yaml and customize.
+# Copy to `data/seeds/tags.yaml` and add your own merchants. That path is
+# gitignored: a real rule set names the shops, gyms and neighbourhoods you spend
+# in, which is a personal profile even though no card number appears in it.
+# `scripts/seed.py` reads it; `make refresh-db` reseeds from it.
 #
-# Tags: (name, color, icon)
-# Rules: (tag_name, pattern, match_type, priority)
-#   - match_type: contains | starts_with | regex
-#   - priority: higher = checked first. Default rules use 0-10, user overrides use 100+
+# Seeding RECONCILES: rules in this file are added, updated and removed to match
+# it. Rules you create through the UI have is_default=false and are never
+# touched. Tags are only ever added, never deleted.
 #
-# NOTE: This file may contain merchant names that reveal personal spending.
-#       data/tag_defaults.yaml is gitignored to keep it private.
+# ── TWO-LEVEL HIERARCHY ───────────────────────────────────────────────────────
+# Tags with no `parent:` are top-level categories; the dashboard chart stacks
+# ONLY these (8 series, not 39) and drills into children on click. Depth is
+# capped at 2 — src/seeding.py raises on a child-of-a-child. Declaration order
+# does not matter: a child may appear before its parent.
+#
+# BOTH the child and its parent are stored on each expense (src/tag_engine.py),
+# which is why `?tag=food` matches every grocery/cafe/restaurant row with no
+# query change. The cost: anything summing across all tag rows double-counts, so
+# consumers must pick one level.
+#
+# Rules normally point at a CHILD. Pointing one at a parent is allowed and is
+# the honest choice when a pattern identifies the category but not the sub-type
+# (see the G[İI]DA rule at the bottom).
+#
+# ── FOUR MATCHING RULES, all forced by real statement data ────────────────────
+#
+# 1. Turkish dotted-İ. Descriptors spell the SAME merchant both ways —
+#    NETFLIX vs NETFLİX, SPOTIFY vs SPOTİFY, DISNEY vs DİSNEY, MIDPOINT vs
+#    MİDPOİNT. TagEngine matches with .upper(), and in Python
+#    'NETFLIX' in 'NETFLİX.COM' is False, so a plain `contains` rule silently
+#    catches one spelling and looks fine for months. Use regex with [İI]
+#    wherever an i/I appears.
+#
+# 2. Payment aggregators wrap the merchant name:
+#      PARAM/<merchant>, IYZICO/<merchant>, PAYCELL/<merchant>,
+#      POSFİX/<merchant>, SIPAY/<merchant>, MOKA UNITED/<merchant>,
+#      TAKSİTLENDİRME/<merchant>  (installment re-bill)
+#    So every merchant rule is `contains`/`regex`, never `starts_with`.
+#
+# 3. Truncated merchant names. The merchant field is cut at roughly 24
+#    characters and the parser welds the continuation on, so full names do not
+#    match: MIGROS arrives as "…CAPACITY MIGRO", CARREFOUR as "…RAY SOKAK CARR",
+#    DECATHLON as "…ISTANBUL DECATH", RESTAURANT as "…BEACH RESTAURAN". Match a
+#    shorter stem wherever this happens.
+#
+# 4. Priorities break ties only WITHIN a tag — they do NOT stop another tag from
+#    also matching, because the engine returns one rule per tag. To keep a
+#    generic rule off specific merchants, exclude them in the pattern with a
+#    lookbehind or an anchor (see \bMARKET\b and BAH[ÇC]E below), not by
+#    outranking them.
 
 tags:
-  - name: restaurant
-    color: "#ef4444"
-    icon: "🍽️"
-  - name: grocery
-    color: "#22c55e"
-    icon: "🛒"
-  - name: transport
-    color: "#3b82f6"
-    icon: "🚕"
-  - name: gas
-    color: "#f97316"
-    icon: "⛽"
-  - name: entertainment
-    color: "#a855f7"
-    icon: "🎮"
-  - name: subscription
-    color: "#6366f1"
-    icon: "💻"
-  - name: shopping
-    color: "#ec4899"
-    icon: "🛍️"
-  - name: food_delivery
-    color: "#f59e0b"
-    icon: "🍕"
-  - name: payment
-    color: "#10b981"
-    icon: "💳"
-  - name: bills
-    color: "#64748b"
-    icon: "🏛️"
-  - name: transit
-    color: "#0ea5e9"
-    icon: "🚇"
-  - name: cafe
-    color: "#78716c"
-    icon: "☕"
-  - name: health
-    color: "#14b8a6"
-    icon: "🏥"
-  - name: education
-    color: "#8b5cf6"
-    icon: "📚"
+  # ── top-level categories (parent_id = NULL; the chart stacks these) ────────
+  - { name: food,       color: "#ef4444", icon: "🍽️" }
+  - { name: transport,  color: "#3b82f6", icon: "🚕" }
+  - { name: home,       color: "#a16207", icon: "🏠" }
+  - { name: digital,    color: "#6366f1", icon: "💻" }
+  - { name: leisure,    color: "#a855f7", icon: "🎭" }
+  - { name: shopping,   color: "#ec4899", icon: "🛍️" }
+  - { name: health,     color: "#14b8a6", icon: "🩺" }
+  - { name: money,      color: "#10b981", icon: "💸" }
 
+  # ── food ──────────────────────────────────────────────────────────────────
+  - { name: grocery,       parent: food, color: "#22c55e", icon: "🛒" }
+  - { name: restaurant,    parent: food, color: "#f87171", icon: "🍴" }
+  - { name: cafe,          parent: food, color: "#78716c", icon: "☕" }
+  - { name: food_delivery, parent: food, color: "#f59e0b", icon: "🍕" }
+
+  # ── transport ─────────────────────────────────────────────────────────────
+  - { name: transit, parent: transport, color: "#0ea5e9", icon: "🚇" }
+  - { name: taxi,    parent: transport, color: "#38bdf8", icon: "🚖" }
+  - { name: fuel,    parent: transport, color: "#f97316", icon: "⛽" }
+  - { name: rental,  parent: transport, color: "#7dd3fc", icon: "🚗" }
+
+  # ── home ──────────────────────────────────────────────────────────────────
+  - { name: hardware,  parent: home, color: "#ca8a04", icon: "🔧" }
+  - { name: furniture, parent: home, color: "#d97706", icon: "🛋️" }
+  - { name: utilities, parent: home, color: "#0891b2", icon: "📡" }
+
+  # ── digital ───────────────────────────────────────────────────────────────
+  - { name: subscription, parent: digital, color: "#818cf8", icon: "🔁" }
+  - { name: gaming,       parent: digital, color: "#c084fc", icon: "🎮" }
+  - { name: dev_tools,    parent: digital, color: "#4f46e5", icon: "🛠️" }
+
+  # ── leisure ───────────────────────────────────────────────────────────────
+  - { name: hobby,         parent: leisure, color: "#d946ef", icon: "📚" }
+  - { name: entertainment, parent: leisure, color: "#c026d3", icon: "🎟️" }
+  - { name: sports,        parent: leisure, color: "#84cc16", icon: "🏅" }
+  - { name: gym,           parent: leisure, color: "#65a30d", icon: "🏋️" }
+  - { name: travel,        parent: leisure, color: "#fb923c", icon: "✈️" }
+  - { name: education,     parent: leisure, color: "#7c3aed", icon: "🎓" }
+
+  # ── shopping ──────────────────────────────────────────────────────────────
+  - { name: clothing,    parent: shopping, color: "#f472b6", icon: "👕" }
+  - { name: electronics, parent: shopping, color: "#0ea5e9", icon: "🔌" }
+  - { name: general,     parent: shopping, color: "#fbcfe8", icon: "🛍️" }
+
+  # ── health ────────────────────────────────────────────────────────────────
+  - { name: pharmacy, parent: health, color: "#10b981", icon: "💊" }
+  - { name: dental,   parent: health, color: "#5eead4", icon: "🦷" }
+
+  # ── money (credits, transfers and charges — not spending) ──────────────────
+  - { name: payment,   parent: money, color: "#34d399", icon: "💳" }
+  - { name: cashback,  parent: money, color: "#059669", icon: "🎁" }
+  - { name: refund,    parent: money, color: "#0d9488", icon: "↩️" }
+  - { name: fee,       parent: money, color: "#71717a", icon: "🧾" }
+  - { name: tax,       parent: money, color: "#64748b", icon: "🏛️" }
+  - { name: insurance, parent: money, color: "#2dd4bf", icon: "🛡️" }
+
+# The rules below are the bank- and language-level patterns that apply to any
+# İşbank statement. Merchant-specific rules belong in your private
+# data/seeds/tags.yaml, not here.
 rules:
-  # restaurant
-  - tag: restaurant
-    pattern: "KEBAP"
-    match_type: contains
-    priority: 5
-  - tag: restaurant
-    pattern: "BURGER"
-    match_type: contains
-    priority: 5
-  - tag: restaurant
-    pattern: "SUBWAY"
-    match_type: contains
-    priority: 5
+  # ══ money — İşbank's own line items ═══════════════════════════════════════
+  # These are not merchants; they are how the bank labels its own entries.
+  - { tag: payment, pattern: "HESAPTAN AKTARIM",   match_type: contains, priority: 30 }
+  - { tag: payment, pattern: "OTOMAT[İI]K TAHS[İI]LAT", match_type: regex, priority: 30 }
+  # İşplus loyalty-tier cashback — NEGATIVE amounts, credits rather than charges.
+  # Three tiers exist (isbank.com.tr/isplus): TURKUAZ, MAVİ, LACİVERT "Seviye".
+  # Which one you get depends on the previous 30 days' spending, so an account
+  # can move between them and all three need covering.
+  #
+  # The tier word is REQUIRED, never a bare colour name: MAVİ alone matches real
+  # merchants (MAVİ JEANS, MAVİ NOKTA MARKET, BÜYÜK MAVİ YAYINCILIK). Both the
+  # full and abbreviated forms appear, with mixed dotted/dotless I —
+  # LACIVERT SEVIYE, LACIVERT SEVİYE, LACİVERT SVY.
+  - { tag: cashback, pattern: "(TURKUAZ|MAV[İI]|LAC[İI]VERT) (SEV[İI]YE|SVY)", match_type: regex, priority: 30 }
+  - { tag: cashback, pattern: "[İI]ND[İI]R[İI]M",  match_type: regex,    priority: 25 }
+  # "Vade farkı iptali" — installment-interest reversal, also negative.
+  - { tag: refund, pattern: "VADE FARKI [İI]PTAL", match_type: regex,    priority: 30 }
+  # İADE = refund. A systematic prefix, not a merchant.
+  - { tag: refund, pattern: "^[İI]ADE/",           match_type: regex,    priority: 30 }
+  - { tag: fee,       pattern: "KRED[İI] KARTI YILLIK", match_type: regex, priority: 30 }
+  - { tag: tax,       pattern: "VERG[İI]",         match_type: regex,    priority: 10 }
+  - { tag: tax,       pattern: "HARÇLAR|HARCLAR",  match_type: regex,    priority: 15 }
+  - { tag: tax,       pattern: "G[İI]B.GOV.TR",    match_type: regex,    priority: 15 }
+  - { tag: insurance, pattern: "S[İI]GORTA",       match_type: regex,    priority: 10 }
 
-  # grocery
-  - tag: grocery
-    pattern: "MIGROS"
-    match_type: contains
-    priority: 5
-  - tag: grocery
-    pattern: "BIM A.S"
-    match_type: contains
-    priority: 5
+  # ══ international services ════════════════════════════════════════════════
+  # Each of these needs [İI] because the same merchant bills both spellings.
+  - { tag: subscription, pattern: "NETFL[İI]X",    match_type: regex,    priority: 10 }
+  - { tag: subscription, pattern: "SPOT[İI]FY",    match_type: regex,    priority: 10 }
+  - { tag: subscription, pattern: "D[İI]SNEY",     match_type: regex,    priority: 10 }
+  - { tag: subscription, pattern: "APPLE.COM/B[İI]LL", match_type: regex, priority: 10 }
+  - { tag: dev_tools,    pattern: "G[İI]THUB",     match_type: regex,    priority: 10 }
+  - { tag: gaming,       pattern: "STEAM",         match_type: contains, priority: 20 }
+  # Catches storefronts and shops alike: STEAMGAMES.COM, ITCH.IO - GAME STORE,
+  # "<name> GAMES", "<name> GAMİNG".
+  - { tag: gaming,       pattern: "GAMES?\\b|GAM[İI]NG", match_type: regex, priority: 5 }
 
-  # entertainment
-  - tag: entertainment
-    pattern: "NETFLIX"
-    match_type: contains
-    priority: 5
-  - tag: entertainment
-    pattern: "DISNEY"
-    match_type: contains
-    priority: 5
-  - tag: entertainment
-    pattern: "SPOTIFY"
-    match_type: contains
-    priority: 5
+  # ══ Turkish national chains ═══════════════════════════════════════════════
+  # Stems, not full names — see matching rule 3 above.
+  - { tag: grocery, pattern: "M[İI]GRO",           match_type: regex,    priority: 10 }
+  - { tag: grocery, pattern: "\\bCARR(EFOUR)?\\b", match_type: regex,    priority: 10 }
+  - { tag: grocery, pattern: "BIM A.S",            match_type: contains, priority: 10 }
+  - { tag: grocery, pattern: "A101",               match_type: contains, priority: 10 }
+  - { tag: grocery, pattern: "ŞOK MARKET",         match_type: contains, priority: 10 }
+  - { tag: food_delivery, pattern: "YEMEK ?SEPET[İI]", match_type: regex, priority: 10 }
+  - { tag: food_delivery, pattern: "GET[İI]R",     match_type: regex,    priority: 10 }
+  - { tag: taxi,    pattern: "UBER",               match_type: contains, priority: 10 }
+  - { tag: transit, pattern: "[İI]STANBULKA",      match_type: regex,    priority: 10 }
+  # BELB[İI] not BELB[İI]M: "AYPARA ÖDEME KURUL/BELBİSTANBUL" is the name
+  # truncated mid-word and welded to İSTANBUL by the parser.
+  - { tag: transit, pattern: "BELB[İI]",           match_type: regex,    priority: 15 }
+  - { tag: transit, pattern: "MARMARAY",           match_type: contains, priority: 15 }
+  - { tag: general, pattern: "TRENDYOL",           match_type: contains, priority: 10 }
+  - { tag: general, pattern: "HEPS[İI]BURADA|HEPS[İI]PAY", match_type: regex, priority: 15 }
+  - { tag: general, pattern: "PTTAVM",             match_type: contains, priority: 10 }
+  - { tag: general, pattern: "DECATH",             match_type: contains, priority: 10 }
+  - { tag: travel,  pattern: "HAVA (YOLLARI|TASIMACILI)|PEGASUS|\\bAJET\\b", match_type: regex, priority: 10 }
+  - { tag: pharmacy, pattern: "ECZANE",            match_type: contains, priority: 10 }
 
-  # subscription
-  - tag: subscription
-    pattern: "APPLE.COM/BILL"
-    match_type: contains
-    priority: 5
-  - tag: subscription
-    pattern: "GITHUB"
-    match_type: contains
-    priority: 5
+  # ══ low-priority Turkish generics ═════════════════════════════════════════
+  # The long tail of one-off local merchants is where most untagged spend hides,
+  # and these businesses name themselves after what they sell. Kept at 1-3 so
+  # specific rules win the tie WITHIN a tag — which does not stop them adding a
+  # second tag from another category.
+  - { tag: cafe,       pattern: "KAH+VE|KAFE|CAFFE", match_type: regex,  priority: 3 }
+  - { tag: cafe,       pattern: "\\bCAFE\\b",      match_type: regex,    priority: 3 }
+  - { tag: cafe,       pattern: "COFFEE|ROASTERY", match_type: regex,    priority: 3 }
+  - { tag: cafe,       pattern: "KAHVALTI",        match_type: contains, priority: 3 }
+  - { tag: cafe,       pattern: "PASTANE|PASTAC",  match_type: regex,    priority: 3 }
+  - { tag: cafe,       pattern: "DONDURMA|ICE ?CREAM", match_type: regex, priority: 3 }
+  # Stems: the field truncates, so "…BEACH RESTAURAN" and "…ISTANBUL RES" lose
+  # the tail of the word.
+  - { tag: restaurant, pattern: "RESTAURAN|RESTORAN|REST\\.", match_type: regex, priority: 3 }
+  - { tag: restaurant, pattern: "LOKANTA",         match_type: contains, priority: 3 }
+  - { tag: restaurant, pattern: "BÜFE|BUFE",       match_type: regex,    priority: 3 }
+  - { tag: restaurant, pattern: "BURGER|P[İI]ZZA|SUSH[İI]|RAMEN|STEAK|BRASSER[İI]E", match_type: regex, priority: 3 }
+  - { tag: restaurant, pattern: "KÖFTE|KOFTE|KEBA[BP]|\\bKEB\\b|DÖNER|DONER", match_type: regex, priority: 3 }
+  - { tag: restaurant, pattern: "P[İI]DEC|MANTI|KOKOREÇ|KOKOREC|Ç[İI]ĞERC|C[İI]GERC", match_type: regex, priority: 3 }
+  - { tag: restaurant, pattern: "TAVACI|KANATÇI|KANATCI|OCAKBAŞI|OCAKBASI", match_type: regex, priority: 3 }
+  # \b so it cannot swallow the city name BALIKESİR.
+  - { tag: restaurant, pattern: "\\bBALIK\\b",     match_type: regex,    priority: 3 }
+  # Garden restaurants ("… BAHÇE", "ÇAY BAHÇESİ"), anchored so the İstanbul
+  # district names BAHÇELİEVLER and BAHÇEŞEHİR do not match — a cosmetics shop
+  # in Bahçelievler is not a restaurant.
+  - { tag: restaurant, pattern: "\\bBAH[ÇC]E\\b|BAH[ÇC]ES[İI]|SAKLIBAH[ÇC]E", match_type: regex, priority: 3 }
+  # Bars and wine shops. \b matters: BAR sits inside plenty of Turkish words.
+  - { tag: restaurant, pattern: "\\bBAR\\b|\\bPUB\\b|IRISHPUB|COCKTAIL", match_type: regex, priority: 3 }
+  - { tag: restaurant, pattern: "ŞARAP|SARAP|\\bWINE\\b|V[İI]SK[İI]|WHISKY", match_type: regex, priority: 3 }
+  - { tag: grocery,    pattern: "TEKEL",           match_type: contains, priority: 3 }
+  - { tag: grocery,    pattern: "KASAP",           match_type: contains, priority: 3 }
+  - { tag: grocery,    pattern: "ET PAZARI",       match_type: contains, priority: 3 }
+  - { tag: grocery,    pattern: "FIRIN",           match_type: contains, priority: 2 }
+  - { tag: grocery,    pattern: "UNLU MAMUL",      match_type: contains, priority: 2 }
+  # Guarded, not outranked: priority does NOT stop other tags from also
+  # matching, so "YAPI MARKET" (hardware) and "OPET MARKET" (a fuel forecourt)
+  # have to be excluded here.
+  #
+  # The leading lookahead excludes İşplus tier cashback. Those credits name the
+  # spend category they were earned in — "LACIVERT SEVIYE MARKET IND" — so
+  # without the guard a refund is tagged as negative grocery spend. Any generic
+  # rule whose keyword doubles as an İşplus category needs the same guard;
+  # that is why the fuel rule below carries it too.
+  - { tag: grocery,    pattern: "^(?!.*(?:SEV[İI]YE|SVY))(?s:.)*?(?<!YAPI )(?<!OPET )\\bMARKET\\b", match_type: regex, priority: 2 }
+  # Independent forecourts name themselves "<family> PETROL" / "AKARYAKIT";
+  # listing only the brands leaves every one of them untagged.
+  - { tag: fuel,       pattern: "^(?!.*(?:SEV[İI]YE|SVY))(?s:.)*?(\\bPETROL\\b|AKARYAKIT|PETROLLER[İI])", match_type: regex, priority: 5 }
+  - { tag: sports,     pattern: "SPOR\\b",         match_type: regex,    priority: 5 }
+  - { tag: sports,     pattern: "SPORT[İI]F",      match_type: regex,    priority: 5 }
+  - { tag: hobby,      pattern: "K[İI]TAP",        match_type: regex,    priority: 3 }
+  - { tag: hobby,      pattern: "YAYINCILI",       match_type: contains, priority: 3 }
+  - { tag: hobby,      pattern: "OYUNCAK",         match_type: contains, priority: 10 }
+  - { tag: general,    pattern: "K[İI]RTAS[İI]YE", match_type: regex,    priority: 10 }
+  - { tag: general,    pattern: "GÜMRÜKSÜZ|DUTY ?FREE|\\bWDF\\b", match_type: regex, priority: 15 }
+  - { tag: electronics, pattern: "B[İI]LG[İI]SAYAR", match_type: regex,  priority: 3 }
+  - { tag: entertainment, pattern: "MÜZES[İI]|MÜZE\\b", match_type: regex, priority: 10 }
+  - { tag: travel,     pattern: "OTEL",            match_type: contains, priority: 5 }
+  - { tag: general,    pattern: "\\bAVM\\b",       match_type: regex,    priority: 2 }
 
-  # food_delivery
-  - tag: food_delivery
-    pattern: "YEMEKSEPETI"
-    match_type: contains
-    priority: 5
-  - tag: food_delivery
-    pattern: "GETIR"
-    match_type: contains
-    priority: 5
-
-  # payment
-  - tag: payment
-    pattern: "HESAPTAN AKTARIM"
-    match_type: contains
-    priority: 10
+  # ── deliberately parent-level ─────────────────────────────────────────────
+  # Every other rule points at a child. This one points at a PARENT: "GIDA"
+  # (food) is the legal-name suffix of Turkish food businesses and covers
+  # restaurants, wholesalers and caterers alike, so naming a sub-type would be a
+  # guess. Better to say "food" and stop there. TagEngine copes: _parent_of(a
+  # parent) is None, so one row is written instead of two.
+  #
+  # \d* because chain branches bill as GIDA2, GIDA3, GIDA5 — a plain \b after
+  # GIDA missed every one of them.
+  - { tag: food, pattern: "\\bG[İI]DA\\d*\\b",     match_type: regex,    priority: 1 }
+  #
+  # Deliberately NO blanket TUR[İI]ZM rule, tempting though it looks. Measured
+  # against real data it was the sole tagger for 11 descriptors but added a
+  # wrong `leisure` parent to 27 others: in Turkey "turizm" is as often an
+  # intercity coach operator or a seaside restaurant as a travel agency. Name
+  # the travel ones individually in your private file instead.
+  #
+  # Same reasoning killed a city-name rule (EDINBURGH -> travel). A location is
+  # not a category; it tagged a clothing purchase as leisure because the shop
+  # happened to be abroad.

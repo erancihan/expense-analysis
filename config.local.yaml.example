@@ -19,11 +19,20 @@
 # trusted_proxies: 1
 # Rate limit on the login endpoint (brute-force defense).
 # login_ratelimit: "10 per minute"
+# Fernet key encrypting each user's stored Gmail OAuth token at rest. Generate:
+#   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+# Without this, per-user Gmail connect is unavailable. Keep it separate from
+# secret_key so rotating the session secret doesn't invalidate stored tokens.
+# token_encryption_key: "REPLACE_WITH_GENERATED_KEY"
 # Exchange rates to TRY for cross-currency totals. Foreign spend is converted in
 # the dashboard's TRY-equivalent total; currencies without a rate are left out.
 # exchange_rates:
 #   USD: 34.0
 #   EUR: 37.0
+# EVDS (TCMB) API key — enables the CPI "today's lira" lens on the Insights
+# page. Free from https://evds3.tcmb.gov.tr. Without it `make fetch-rates`
+# fetches FX only (USD lens still works).
+# evds_api_key: "REPLACE_WITH_YOUR_EVDS_KEY"
 
 # bank_config:
 #   isbank:

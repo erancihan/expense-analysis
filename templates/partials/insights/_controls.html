@@ -1,0 +1,45 @@
+<!-- Page-wide controls: every panel follows the lens, basis and range. -->
+<section class="glass-card rounded-2xl p-4 mb-6 flex flex-wrap items-center gap-x-6 gap-y-3 text-xs font-medium">
+    <div class="flex items-center gap-2">
+        <span class="text-slate-500 uppercase tracking-wider">Lens</span>
+        <div class="flex items-center rounded-lg border border-slate-700/50 overflow-hidden">
+            <template x-for="(l, i) in (meta ? meta.lenses : [])" :key="l.id">
+                <button @click="setLens(l.id)" :disabled="!l.available" :title="l.reason || ''"
+                        :class="[lens === l.id ? 'bg-indigo-600 text-white' : 'bg-slate-800/60 text-slate-400 hover:text-slate-200 hover:bg-slate-700/50',
+                                 i ? 'border-l border-slate-700/50' : '']"
+                        class="px-3 py-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-slate-800/60 disabled:hover:text-slate-400"
+                        x-text="l.label"></button>
+            </template>
+        </div>
+    </div>
+
+    <div class="flex items-center gap-2">
+        <span class="text-slate-500 uppercase tracking-wider">Basis</span>
+        <div class="flex items-center rounded-lg border border-slate-700/50 overflow-hidden">
+            <template x-for="(b, i) in BASES" :key="b">
+                <button @click="setBasis(b)"
+                        :title="b === 'billed' ? 'Installments counted in the month the bank bills them' : 'Installment plans counted in full, in the month of purchase'"
+                        :class="[basis === b ? 'bg-indigo-600 text-white' : 'bg-slate-800/60 text-slate-400 hover:text-slate-200 hover:bg-slate-700/50',
+                                 i ? 'border-l border-slate-700/50' : '']"
+                        class="px-3 py-1.5 transition-colors capitalize" x-text="b"></button>
+            </template>
+        </div>
+    </div>
+
+    <div class="flex items-center gap-2">
+        <span class="text-slate-500 uppercase tracking-wider">Range</span>
+        <div class="flex items-center rounded-lg border border-slate-700/50 overflow-hidden">
+            <template x-for="(r, i) in RANGES" :key="r.id">
+                <button @click="setRange(r.id)"
+                        :class="[range === r.id ? 'bg-indigo-600 text-white' : 'bg-slate-800/60 text-slate-400 hover:text-slate-200 hover:bg-slate-700/50',
+                                 i ? 'border-l border-slate-700/50' : '']"
+                        class="px-3 py-1.5 transition-colors" x-text="r.label"></button>
+            </template>
+        </div>
+    </div>
+
+    <div class="ml-auto text-slate-500" x-show="trend && trend.from">
+        <span x-text="trend && trend.from"></span> – <span x-text="trend && trend.to"></span>
+        <span x-show="loading" class="ml-2 text-indigo-400">loading…</span>
+    </div>
+</section>

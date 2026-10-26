@@ -18,9 +18,10 @@ each user has isolated expenses and connects their own Gmail.
 - [x] **Phase 1 — Stabilize the WIP** *(done 2026-06-26)*
 - [x] **Phase 0 — Hygiene** *(done 2026-06-26)*
 - [x] **Phase 2 — Full multi-user + security** *(2a auth+isolation, 2b hardening, 2c per-user Gmail — all done)*
-- [~] **Phase 3 — Tests & CI** *(parser/tag-engine/auth tests done; CI green on GitHub since 2026-08-05; PDF-fixture test remains)*
+- [x] **Phase 3 — Tests & CI** *(parser/tag-engine/auth tests done; CI green on GitHub since 2026-08-05; fixture-based parser integration test added 2026-08-05)*
 - [~] **Phase 4 — Features** *(CSV export, budgets, cross-currency done; strict-CSP + extra bank parsers remain)*
 - [~] **Phase 5 — Docs accuracy** *(README synced to code 2026-08-05; ROADMAP audit ongoing)*
+- [~] **Phase 6 — Insights** *(foundation + trend panel done; "What's locked in?" next)*
 
 ---
 
@@ -114,14 +115,20 @@ signup) · invite/admin-only registration.
 - [x] Settings UI: Connect/Disconnect (hidden until an OAuth client is configured).
 - [x] Google Cloud *Web client* setup documented (README). Tests mock the Google libs
       (status/connect/callback/disconnect + processor iteration). Full suite: 69 passing.
-- [ ] *Follow-up:* encrypt the `gmail_token` column at rest.
+- [x] *Follow-up done (2026-08-06):* `gmail_token` is encrypted at rest with Fernet
+      under a dedicated `token_encryption_key` (`src/token_crypto.py` +
+      `EncryptedText` in `src/models.py`). No schema migration was needed — the
+      column was already `TEXT`. Connect is gated on a key being configured, so a
+      token can never be stored unencrypted. Reads that fail to decrypt log and
+      return `None` rather than raising, because Flask-Login loads a `User` on
+      every request and a raising column type would 500 the whole app.
 
 ### Decisions (resolved 2026-06-26)
 - **Auth:** password accounts (werkzeug hashing + Flask-Login sessions).
 - **Default tags:** per-user, seeded on signup → `Tag`/`TagRule` get a `user_id` in 2a-ii.
 - **Registration:** invite/admin-only; initial admin via `scripts/create_user.py`.
 
-## Phase 3 — Tests & CI *(in progress)*
+## Phase 3 — Tests & CI ✅ *(done 2026-08-05)*
 
 - [x] Unit tests for the İşbank parser pure functions (Turkish number normalisation,
       amount/date patterns, card-metadata extraction, position matching).
@@ -137,8 +144,13 @@ signup) · invite/admin-only registration.
       by the file's presence.)*
 - [—] *Optional:* `SessionStart` hook to auto-create the venv for Claude-on-web sessions —
       **not pursued**: development happens in a local terminal, where the hook is inert.
-- [ ] *Nice-to-have:* full `extract_transactions` integration test (needs a checked-in
-      sample PDF fixture).
+- [x] Full `extract_transactions` integration test *(2026-08-05)* — five tests in
+      `tests/test_isbank_integration.py` run the real `pdfminer` layout path against a
+      PDF generated at test time by `tests/fixtures/isbank_pdf.py`. No sample statement
+      is checked in: real statements carry a name and address, which is how `raw_pdf.txt`
+      reached the former parent repo's public history. Covers card metadata, amount
+      matching by row position, the `amount=None` path, description continuation, the
+      `TOPLAM` stop marker, and a missing `TUTAR` header.
 
 ## Phase 4 — Features *(in progress)*
 
@@ -181,3 +193,53 @@ run, or `gh` — never against another document.
 - [ ] Audit the rest of this file the same way — Phases 1/2 are still marked done on the
       strength of their own prose. The code and tests for them do exist, but the
       individual sub-claims have not been checked line by line.
+
+## Phase 6 — Insights *(in progress)*
+
+Graphs and insights about spending habits on a separate `/insights` page,
+computed at request time (nothing derived from a user's data enters this
+public repo). Five sub-projects, each with its own spec → plan → build cycle:
+0 foundation, 1 page shell + "Am I spending more?", 2 "What's locked in?",
+3 "Where does it go?", 4 "What's unusual?".
+
+**0 — Foundation** ✅ *(done 2026-10-20, except the CPI lens)*
+- [x] Parser reads the closing date from the label's own row (it took the first
+      date in the text, which filed some 2021-era statements a month late) and
+      the TAKSİT BİLGİSİ installment column. Also accepts a signed foreign
+      balance (`+11,58 USD`), which had made one USD statement parse as TRY.
+- [x] `statements` table (card + closing date + **currency**: İşbank issues a
+      separate TRY and USD statement per cycle, and keying without currency
+      made eight USD statements look like re-deliveries);
+      `expenses.statement_id` + `installment_*`; `rates` table.
+- [x] Backfill applied to the real data in place *(2026-10-20)* — 132
+      statements, 4362/4362 rows matched, 0 unmatched either way, 57 period
+      corrections (2021-12→2021-11, 2022-03→2022-02, 2022-05→2022-04), 2
+      currency corrections, 167 rows with installment info. No insert, delete
+      or retag; tag sets verified identical before and after (8498 links).
+- [x] `src/analytics/`: months, coverage, merchant normalization, rates,
+      `load_spend`. 232 tests pass.
+- [~] `make fetch-rates` run — FX (USDTRY, EURTRY) stored for 91 months.
+      **CPI still pending:** needs a free EVDS key in `evds_api_key`, so the
+      "today's lira" lens is unavailable and only the USD lens works.
+
+Coverage on the real data reports six incomplete months, each a genuinely
+missing statement: 2022-12, 2023-07, 2023-11, 2024-03, 2025-07, 2026-05. The
+months the period bug used to distort (2021-11, 2022-02, 2022-04) now read as
+complete.
+
+**1 — Page shell + "Am I spending more?"** ✅ *(done 2026-10-26)*
+- [x] `/insights` page with lens / basis / range controls mirrored in the query
+      string; Dashboard | Insights navigation shared through `_nav.html`.
+- [x] `src/analytics/trend.py` (pure) + `src/insights_api.py` (`/api/insights/meta`,
+      `/trend`; GET, user-scoped). Uncovered months: `incomplete` muted,
+      `none` as a gap; rolling averages and YoY/KPI comparisons use complete
+      months only, pairing each month with the same month a year earlier.
+- [x] Panel: KPI tiles, monthly bars + 3/12-month averages, annual totals (YTD
+      flagged), quarterly category mix with drill-down, YoY table. 274 tests
+      pass; checked in a browser against the real data (lens/basis/range
+      switching, drill-down and back, legend toggle, dashboard unaffected).
+- [ ] The today's-lira lens stays disabled until `evds_api_key` is set and
+      `make fetch-rates` has stored CPI.
+
+Mark items done only after checking them against the code, a test run, or the
+backfill report — not against this file.

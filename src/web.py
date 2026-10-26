@@ -8,21 +8,21 @@ expenses, tags, and tag rules.
 import logging
 import os
 from datetime import datetime, timedelta
-from functools import wraps
 
 from flask import Flask, jsonify, request, send_from_directory, render_template, redirect, url_for, session, Response
 from flask_login import LoginManager, current_user
 from werkzeug.middleware.proxy_fix import ProxyFix
 from sqlalchemy import func, extract
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from src.config import SECRET_KEY, SESSION_COOKIE_SECURE, TRUSTED_PROXIES, EXCHANGE_RATES
 from src.database import SessionLocal
 from src.models import Expense, Tag, TagRule, ExpenseTag, User, Budget
 from src.tag_engine import TagEngine
 from src.auth import auth_bp
-from src.extensions import csrf, limiter
-from src import gmail_oauth
+from src.extensions import csrf, limiter, get_session, with_db
+from src.insights_api import insights_bp
+from src import gmail_oauth, token_crypto
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +75,7 @@ def unauthorized():
 
 
 app.register_blueprint(auth_bp)
+app.register_blueprint(insights_bp)
 
 # Allowlisted endpoints reachable without a session. Everything else is denied
 # by default (fail-closed), so new routes are protected unless added here.
@@ -119,29 +120,6 @@ def add_security_headers(response: Response) -> Response:
     return response
 
 
-# ── DB session helper ────────────────────────────────────────────────────────
-
-def get_session() -> Session:
-    return SessionLocal()
-
-
-def with_db(f):
-    """Decorator to inject a DB session and handle cleanup."""
-    @wraps(f)
-    def wrapper(*args, **kwargs):
-        db = get_session()
-        try:
-            result = f(db, *args, **kwargs)
-            return result
-        except Exception as e:
-            db.rollback()
-            logger.error(f"API error in {f.__name__}: {e}", exc_info=True)
-            return jsonify({'error': 'Internal server error'}), 500
-        finally:
-            db.close()
-    return wrapper
-
-
 def _owns_expense(db: Session, expense_id: int) -> bool:
     """True if the expense exists and belongs to the current user."""
     return db.query(Expense.id).filter_by(
@@ -153,7 +131,12 @@ def _owns_expense(db: Session, expense_id: int) -> bool:
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    return render_template('index.html', active_page='dashboard')
+
+
+@app.route('/insights')
+def insights_page():
+    return render_template('insights.html', active_page='insights')
 
 def parse_date_filter(date_str: str, is_end: bool = False):
     if not date_str: return None
@@ -180,15 +163,55 @@ def parse_date_filter(date_str: str, is_end: bool = False):
 
 # ── API: Expenses ────────────────────────────────────────────────────────────
 
-def _filtered_user_expenses(db: Session):
-    """Current user's expenses with from/to/card/tag/search filters applied,
-    newest first. Shared by the list and CSV-export endpoints so they can't drift.
+# Sortable columns, exposed as ?sort=. Anything else falls back to 'date' rather
+# than erroring, so a stale bookmark cannot 500 the page.
+_SORT_COLUMNS = {
+    'date': Expense.date,
+    'description': Expense.description,
+    'amount': Expense.amount,
+    'card': Expense.card_number,
+}
+
+
+def _apply_sort(db: Session, query):
+    """Order an expense query from ?sort= and ?dir=.
+
+    Server-side by necessity: /api/expenses is paginated, so sorting on the
+    client would only reorder the page currently displayed while looking correct.
     """
-    query = (
-        db.query(Expense)
-        .filter(Expense.user_id == current_user.id)
-        .order_by(Expense.date.desc(), Expense.id.desc())
-    )
+    sort = request.args.get('sort', 'date')
+    descending = request.args.get('dir', 'desc').lower() != 'asc'
+
+    if sort == 'tag':
+        # Alphabetically-first "parent/child" label per expense, so the ordering
+        # reflects the hierarchy. Untagged expenses yield NULL and are forced
+        # last in both directions.
+        parent = aliased(Tag)
+        label = (
+            db.query(func.min(func.coalesce(parent.name, '') + '/' + Tag.name))
+            .select_from(ExpenseTag)
+            .join(Tag, Tag.id == ExpenseTag.tag_id)
+            .outerjoin(parent, parent.id == Tag.parent_id)
+            .filter(ExpenseTag.expense_id == Expense.id)
+            .filter(ExpenseTag.source != 'suppressed')
+            .correlate(Expense)
+            .scalar_subquery()
+        )
+        direction = label.desc() if descending else label.asc()
+        return query.order_by(label.is_(None), direction, Expense.id.desc())
+
+    column = _SORT_COLUMNS.get(sort, Expense.date)
+    direction = column.desc() if descending else column.asc()
+    # id is a stable tiebreaker so pagination cannot repeat or skip rows.
+    return query.order_by(direction, Expense.id.desc())
+
+
+def _filtered_user_expenses(db: Session):
+    """Current user's expenses with from/to/card/tag/search filters applied and
+    ?sort=/?dir= ordering. Shared by the list and CSV-export endpoints so they
+    can't drift.
+    """
+    query = db.query(Expense).filter(Expense.user_id == current_user.id)
 
     dt_from = parse_date_filter(request.args.get('from'), is_end=False)
     if dt_from:
@@ -219,7 +242,7 @@ def _filtered_user_expenses(db: Session):
     if search and len(search) <= 200:
         query = query.filter(Expense.description.ilike(f'%{search}%'))
 
-    return query
+    return _apply_sort(db, query)
 
 
 @app.route('/api/expenses')
@@ -323,6 +346,35 @@ def api_export_csv(db: Session):
 
 # ── API: Monthly Summary ────────────────────────────────────────────────────
 
+@app.route('/api/summary/latest-period')
+@with_db
+def api_summary_latest_period(db: Session):
+    """The most recent statement period that actually holds data.
+
+    The dashboard opens on this rather than on the current calendar month: the
+    statement for the running month has not been issued yet, so defaulting to
+    it showed an empty table and no chart bar.
+
+    The filters deliberately mirror api_summary_monthly, so the period
+    returned here is always the last bar of the chart. That includes
+    `category != 'Payment'` dropping rows with a NULL category — in SQL
+    `NULL != 'Payment'` is NULL, not true. Imports set the column, so this
+    costs nothing today, and matching the chart matters more than the edge
+    case; fixing it belongs in both queries at once.
+
+    Returns `{'period': None}` for a user with no expenses, which the frontend
+    reads as "fall back to the current month".
+    """
+    period = (
+        db.query(func.max(Expense.statement_period))
+        .filter(Expense.user_id == current_user.id)
+        .filter(Expense.category != 'Payment')
+        .filter(Expense.statement_period.isnot(None))
+        .scalar()
+    )
+    return jsonify({'period': period})
+
+
 @app.route('/api/summary/monthly')
 @with_db
 def api_summary_monthly(db: Session):
@@ -373,6 +425,11 @@ def api_summary_monthly(db: Session):
     tag_monthly = {}   # {period: {tag_name: {'total': float, 'color': str}}}
     currency_monthly = {}  # {period: {currency: {'total': float, 'count': int}}}
     card_monthly = {}      # {period: {card_number: {'total': float, 'count': int, 'currency': str}}}
+    # {period: {'total': float, 'count': int}} for expenses carrying no active
+    # tag. The client cannot derive this by subtracting by_tag from the total:
+    # by_tag holds parents AND children, and an expense under two parents
+    # appears in both, so that sum overshoots the real tagged spend.
+    untagged_monthly = {}
 
     for expense in expenses:
         period = expense.statement_period  # e.g. "2026-04"
@@ -385,6 +442,12 @@ def api_summary_monthly(db: Session):
                 monthly[period] = {'total': 0.0, 'count': 0}
             monthly[period]['total'] += expense.amount
             monthly[period]['count'] += 1
+
+            if expense.id not in tag_assignments:
+                if period not in untagged_monthly:
+                    untagged_monthly[period] = {'total': 0.0, 'count': 0}
+                untagged_monthly[period]['total'] += expense.amount
+                untagged_monthly[period]['count'] += 1
 
         # Per-currency breakdown
         if period not in currency_monthly:
@@ -415,6 +478,16 @@ def api_summary_monthly(db: Session):
     # Collect all periods (from both TRY and non-TRY)
     all_periods = set(monthly.keys()) | set(currency_monthly.keys())
 
+    # tag name -> parent tag name (or None). Both levels are stored on each
+    # expense, so by_tag contains parents AND children. Any consumer that sums
+    # across entries must pick a single level or it double-counts; the dashboard
+    # chart renders only entries whose parent is None. Budgets index by an exact
+    # tag name, so they work at either level.
+    parent_by_name = {
+        t.name: (t.parent.name if t.parent else None)
+        for t in db.query(Tag).filter_by(user_id=current_user.id).all()
+    }
+
     # Build sorted result
     result = []
     for period in sorted(all_periods):
@@ -425,6 +498,7 @@ def api_summary_monthly(db: Session):
             by_tag[tag_name] = {
                 'total': round(data['total'], 2),
                 'color': data['color'],
+                'parent': parent_by_name.get(tag_name),
             }
         by_currency = {}
         for cur, data in currency_monthly.get(period, {}).items():
@@ -449,6 +523,7 @@ def api_summary_monthly(db: Session):
             rate = 1.0 if cur == 'TRY' else EXCHANGE_RATES.get(cur)
             if rate is not None:
                 converted_total += data['total'] * rate
+        u = untagged_monthly.get(period, {'total': 0.0, 'count': 0})
         result.append({
             'year': year,
             'month': month,
@@ -456,6 +531,8 @@ def api_summary_monthly(db: Session):
             'total': round(m['total'], 2),
             'converted_total': round(converted_total, 2),
             'count': m['count'],
+            'untagged': round(u['total'], 2),
+            'untagged_count': u['count'],
             'by_tag': by_tag,
             'by_currency': by_currency,
             'by_card': by_card,
@@ -494,12 +571,24 @@ def api_create_tag(db: Session):
         db.commit()
         return jsonify(existing.to_dict())
 
+    parent_id = data.get('parent_id')
+    if parent_id is not None:
+        parent = db.query(Tag).filter_by(id=parent_id, user_id=current_user.id).first()
+        if not parent:
+            return jsonify({'error': 'Parent tag not found'}), 404
+        if parent.parent_id is not None:
+            return jsonify({
+                'error': 'Only two levels of tags are supported; that parent '
+                         'already has a parent.'
+            }), 400
+
     tag = Tag(
         user_id=current_user.id,
         name=name,
         color=data.get('color', '#6366f1')[:7],
         icon=data.get('icon', '🏷️')[:4],
         is_default=False,
+        parent_id=parent_id,
     )
     db.add(tag)
     db.commit()
@@ -512,6 +601,16 @@ def api_delete_tag(db: Session, tag_id: int):
     tag = db.query(Tag).filter_by(id=tag_id, user_id=current_user.id).first()
     if not tag:
         return jsonify({'error': 'Tag not found'}), 404
+
+    # Tag.children cascades delete-orphan, and each child cascades its own
+    # expense_tags — so deleting a parent would silently remove every assignment
+    # its children carry. Make the caller deal with the children first.
+    if tag.children:
+        return jsonify({
+            'error': 'This tag has child tags. Delete or re-parent the children '
+                     'first — deleting a parent would remove them and every '
+                     'expense assignment they carry.'
+        }), 400
 
     db.delete(tag)
     db.commit()
@@ -694,6 +793,51 @@ def api_set_expense_tags(db: Session, expense_id: int):
 
     db.commit()
     return jsonify({'ok': True})
+
+
+@app.route('/api/expenses/<int:expense_id>/tags/<int:tag_id>', methods=['POST'])
+@with_db
+def api_add_expense_tag(db: Session, expense_id: int, tag_id: int):
+    """Attach one tag to one expense directly — no pattern, no rule, no re-tag.
+
+    Until this existed the only way to tag from the UI was to invent a pattern
+    and create an auto-rule, which then re-tagged every expense in the account.
+    One-off merchants had no sensible pattern to give.
+
+    Additive and idempotent, unlike POST /api/expenses/<id>/tags, which
+    replaces the whole manual set.
+
+    The parent is written alongside the child, matching TagEngine.apply_rules:
+    the chart stacks parent-level entries, so a child-only row would leave the
+    expense invisible there. Both rows are stored source='manual' because
+    retag_all() deletes every source='auto' row — an 'auto' parent would vanish
+    on the next re-tag and never return, since no rule matches it.
+    """
+    if not _owns_expense(db, expense_id):
+        return jsonify({'error': 'Expense not found'}), 404
+
+    tag = db.query(Tag).filter_by(id=tag_id, user_id=current_user.id).first()
+    if not tag:
+        return jsonify({'error': 'Tag not found'}), 404
+
+    wanted = [tag.id]
+    if tag.parent_id is not None:
+        wanted.append(tag.parent_id)
+
+    added = []
+    for tid in wanted:
+        et = db.query(ExpenseTag).filter_by(expense_id=expense_id, tag_id=tid).first()
+        if et is None:
+            db.add(ExpenseTag(expense_id=expense_id, tag_id=tid, source='manual'))
+            added.append(tid)
+        elif et.source == 'suppressed':
+            # Adding back something previously hidden is an explicit choice, so
+            # promote it to manual rather than leaving it suppressed.
+            et.source = 'manual'
+            added.append(tid)
+
+    db.commit()
+    return jsonify({'ok': True, 'added': added})
 
 
 @app.route('/api/expenses/<int:expense_id>/tags/<int:tag_id>', methods=['DELETE'])
@@ -909,19 +1053,28 @@ def api_delete_budget(db: Session, budget_id: int):
 
 # ── Gmail connection (per-user OAuth) ─────────────────────────────────────────
 
+def _gmail_connect_available() -> bool:
+    """Whether the in-app Gmail connect flow can run.
+
+    Requires both a configured OAuth client and a token encryption key — without
+    a key, connecting could only store the token unencrypted.
+    """
+    return gmail_oauth.credentials_available() and token_crypto.encryption_available()
+
+
 @app.route('/api/gmail/status')
 @with_db
 def api_gmail_status(db: Session):
     user = db.get(User, current_user.id)
     return jsonify({
         'connected': bool(user and user.gmail_token),
-        'available': gmail_oauth.credentials_available(),
+        'available': _gmail_connect_available(),
     })
 
 
 @app.route('/gmail/connect')
 def gmail_connect():
-    if not gmail_oauth.credentials_available():
+    if not _gmail_connect_available():
         return redirect(url_for('index'))
     redirect_uri = url_for('gmail_callback', _external=True)
     flow = gmail_oauth.build_flow(redirect_uri)

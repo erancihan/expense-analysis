@@ -3,7 +3,7 @@ PYTHON := $(VENV)/bin/python
 PIP := $(VENV)/bin/pip
 ALEMBIC := $(VENV)/bin/alembic
 
-.PHONY: install web process import-pdfs retag seed backup-tags refresh-db migrations create-user clean
+.PHONY: install install-dev web process import-pdfs retag seed backup-tags refresh-db migrations create-user clean backfill-statements fetch-rates
 
 ## Create virtual environment (only if it doesn't exist)
 $(VENV):
@@ -12,6 +12,10 @@ $(VENV):
 ## Install dependencies
 install: venv
 	$(PIP) install -r requirements.txt
+
+## Install dependencies including test-only ones
+install-dev: venv
+	$(PIP) install -r requirements-dev.txt
 
 ## ── Application ─────────────────────────────────────────────────
 
@@ -50,20 +54,27 @@ seed: install
 backup-tags: install
 	$(PYTHON) scripts/backup_tags.py
 
-## Full DB refresh: backup tags → reset DB → migrate → seed → download → import → retag
+## Fetch monthly FX (and CPI, with evds_api_key) into the rates table
+fetch-rates: install
+	$(PYTHON) scripts/fetch_rates.py
+
+## Full data refresh: snapshot tags → migrate → seed → download → re-import → retag
+## Rebuilds all expense data in place. Your account, tags and rules survive: it
+## no longer deletes the database file (that wiped the user and left you locked
+## out, since there is no create-user step), and the tag snapshot no longer
+## overwrites data/seeds/tags.yaml, which is the input this reseeds from.
 refresh-db: install
-	@echo "══════ Backing up tags ══════"
-	$(PYTHON) scripts/backup_tags.py
-	@echo "══════ Removing database ══════"
-	rm -f data/expenses.db data/expenses.db-shm data/expenses.db-wal
+	@echo "══════ Snapshotting current tags ══════"
+	@echo "(timestamped — deliberately NOT data/seeds/tags.yaml, which is the input)"
+	$(PYTHON) scripts/backup_tags.py -o data/seeds/tags.snapshot-$$(date +%Y%m%d-%H%M%S).yaml
 	@echo "══════ Running migrations ══════"
 	$(ALEMBIC) upgrade head
-	@echo "══════ Seeding tags ══════"
+	@echo "══════ Reconciling tags & rules from data/seeds/tags.yaml ══════"
 	$(PYTHON) scripts/seed.py
 	@echo "══════ Downloading PDFs ══════"
 	$(PYTHON) scripts/download_pdfs.py
-	@echo "══════ Importing PDFs ══════"
-	$(PYTHON) scripts/import_pdfs.py
+	@echo "══════ Clearing expenses and re-importing ══════"
+	$(PYTHON) scripts/import_pdfs.py --clear
 	@echo "══════ Re-tagging ══════"
 	$(PYTHON) scripts/retag.py
 	@echo "══════ Done ══════"
@@ -81,6 +92,11 @@ import-pdfs: install
 ## Import all PDFs (clearing existing data first)
 import-pdfs-clean: install
 	$(PYTHON) scripts/import_pdfs.py --clear
+
+## Link expenses to statements + fill installment fields, in place.
+## Dry run unless APPLY=1 (which backs up the DB and tag sets to data/backups/ first).
+backfill-statements: install
+	$(PYTHON) scripts/backfill_statements.py $$([ -n "$(APPLY)" ] && echo "--apply")
 
 ## Re-tag all expenses using current rules
 retag: install
@@ -118,7 +134,7 @@ create-user: install
 ## ── Testing ─────────────────────────────────────────────────────
 
 ## Run tests
-test: install
+test: install-dev
 	$(PYTHON) -m unittest discover -s tests -v
 
 ## ── Cleanup ─────────────────────────────────────────────────────

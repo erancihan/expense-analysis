@@ -1,16 +1,56 @@
 from sqlalchemy import (
-    Column, Integer, String, Float, DateTime, Text, Boolean,
-    ForeignKey, UniqueConstraint, create_engine,
+    Column, Integer, String, Float, Date, DateTime, Text, Boolean,
+    ForeignKey, UniqueConstraint, create_engine, TypeDecorator,
 )
 from sqlalchemy.orm import declarative_base, relationship
 from datetime import datetime, timezone
 
 from flask_login import UserMixin
 
+import logging
+
+from src import token_crypto
+
+logger = logging.getLogger(__name__)
+
 def utc_now():
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 Base = declarative_base()
+
+
+class EncryptedText(TypeDecorator):
+    """A TEXT column encrypted at rest via src.token_crypto.
+
+    Reads and writes are deliberately asymmetric.
+
+    A failed read logs and returns None rather than raising. Flask-Login's
+    user_loader (src/web.py:60-66) loads a User on every authenticated request,
+    and loading decrypts this column — so raising here would turn a wrong or
+    rotated key into a 500 on every page in the app, not just on Gmail features.
+    Returning None degrades to "not connected" and the user reconnects.
+
+    A failed write raises, because storing plaintext would defeat the purpose.
+    SQLAlchemy wraps that as sqlalchemy.exc.StatementError, with the underlying
+    TokenEncryptionError available as `err.orig`.
+    """
+
+    impl = Text
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return None
+        return token_crypto.encrypt(value)
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return None
+        try:
+            return token_crypto.decrypt(value)
+        except token_crypto.TokenEncryptionError as e:
+            logger.error(f"Stored Gmail token could not be decrypted: {e}")
+            return None
 
 
 class User(Base, UserMixin):
@@ -26,7 +66,7 @@ class User(Base, UserMixin):
     # Per-user Gmail OAuth token (JSON from the web consent flow). Null = not
     # connected. The Gmail processor ingests each connected user's statements
     # into their own account.
-    gmail_token = Column(Text, nullable=True)
+    gmail_token = Column(EncryptedText, nullable=True)
     created_at = Column(DateTime, default=utc_now)
 
     def __repr__(self):
@@ -51,13 +91,55 @@ class Expense(Base):
     card_number = Column(String, nullable=True)
     statement_period = Column(String, nullable=True)  # YYYY-MM from source PDF
     raw_text = Column(Text, nullable=True)
+    # The statement this row was parsed from (NULL for rows imported before
+    # statements were recorded and not yet backfilled).
+    statement_id = Column(Integer, ForeignKey('statements.id'), nullable=True, index=True)
+    # From the statement's TAKSİT BİLGİSİ column, "n/N taksidi (total)":
+    # installment n of N of a purchase whose full amount is installment_total.
+    installment_no = Column(Integer, nullable=True)
+    installment_count = Column(Integer, nullable=True)
+    installment_total = Column(Float, nullable=True)
     created_at = Column(DateTime, default=utc_now)
 
     # Many-to-many relationship with Tag through ExpenseTag
     expense_tags = relationship('ExpenseTag', back_populates='expense', cascade='all, delete-orphan')
+    statement = relationship('Statement', back_populates='expenses')
 
     def __repr__(self):
         return f"<Expense(date='{self.date}', description='{self.description}', amount={self.amount})>"
+
+
+class Statement(Base):
+    """One imported card statement (one PDF).
+
+    closing_date is the "Hesap Kesim Tarihi"; period is its YYYY-MM. Coverage
+    analysis uses the closing dates to find statements that were never
+    imported.
+    """
+    __tablename__ = 'statements'
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
+    card_number = Column(String, nullable=False)
+    closing_date = Column(Date, nullable=False)
+    # İşbank sends one statement per currency for the same card and cycle, so
+    # a TRY and a USD statement share card_number and closing_date.
+    currency = Column(String(3), nullable=False, default='TRY')
+    period = Column(String(7), nullable=False)
+    source_file = Column(String, nullable=True)
+    email_id = Column(String, nullable=True)
+    imported_at = Column(DateTime, default=utc_now)
+
+    expenses = relationship('Expense', back_populates='statement')
+
+    # A statement re-delivered by a second email is the same statement.
+    __table_args__ = (
+        UniqueConstraint('user_id', 'card_number', 'closing_date', 'currency',
+                         name='uq_statements_user_card_closing_currency'),
+    )
+
+    def __repr__(self):
+        return f"<Statement(card='{self.card_number}', closing_date='{self.closing_date}')>"
 
 
 class Tag(Base):
@@ -69,11 +151,22 @@ class Tag(Base):
     color = Column(String, default='#6366f1')                # hex color for UI chip
     icon = Column(String, default='🏷️')                      # emoji
     is_default = Column(Boolean, default=False)              # shipped with app
+    # Two-level hierarchy: a parent tag has parent_id=None; a child points at it.
+    # Depth is capped at 2 (validated in src/seeding.py and POST /api/tags) so
+    # every rollup stays a single join.
+    parent_id = Column(Integer, ForeignKey('tags.id'), nullable=True, index=True)
     created_at = Column(DateTime, default=utc_now)
 
     # Relationships
     expense_tags = relationship('ExpenseTag', back_populates='tag', cascade='all, delete-orphan')
     rules = relationship('TagRule', back_populates='tag', cascade='all, delete-orphan')
+    # NOTE: deleting a parent takes its children — and, through their own
+    # expense_tags cascade, every assignment those children carry. web.py's
+    # DELETE /api/tags/<id> refuses to delete a tag that still has children.
+    children = relationship(
+        'Tag', back_populates='parent', cascade='all, delete-orphan',
+    )
+    parent = relationship('Tag', back_populates='children', remote_side=[id])
 
     # Tag names are unique per user, not globally.
     __table_args__ = (
@@ -90,6 +183,8 @@ class Tag(Base):
             'color': self.color,
             'icon': self.icon,
             'is_default': self.is_default,
+            'parent_id': self.parent_id,
+            'parent_name': self.parent.name if self.parent else None,
         }
 
 
@@ -179,3 +274,20 @@ class ProcessedEmail(Base):
     def __repr__(self):
         return f"<ProcessedEmail(message_id='{self.message_id}', status='{self.status}')>"
 
+
+
+class Rate(Base):
+    """Monthly macro series (USDTRY, EURTRY, CPI_TR) — see src/analytics/rates.py.
+
+    Public figures shared by every user, so there is no user_id. provisional
+    marks a month copied forward from the last published value.
+    """
+    __tablename__ = 'rates'
+
+    series = Column(String, primary_key=True)
+    month = Column(String(7), primary_key=True)   # YYYY-MM
+    value = Column(Float, nullable=False)
+    provisional = Column(Boolean, default=False, nullable=False)
+
+    def __repr__(self):
+        return f"<Rate(series='{self.series}', month='{self.month}', value={self.value})>"

@@ -10,8 +10,11 @@ A personal expense tracker that parses İşbank credit card statement PDFs, cate
 - **Web Dashboard** — Single-page app with ECharts graphs, filterable expense table, and tag management
 - **Multi-User** — Password accounts with fully isolated expenses, tags, rules and budgets per user
 - **Budgets** — Per-tag and overall monthly limits with spent/limit progress on the dashboard
+- **Insights** — A separate `/insights` page: "Am I spending more?" with monthly and annual spend in nominal lira, today's lira (needs CPI) or USD, rolling averages, a quarterly category mix and a year-over-year table. Months with a missing statement are shown as incomplete, never as zero
 - **CSV Export** — Downloads the current filtered view; text fields are formula-injection-safe
 - **Cross-Currency Totals** — Configurable exchange rates produce a TRY-equivalent grand total alongside per-currency figures
+- **Statements & Installments** — Every import records its statement (card + closing date) and the installment column (`n/N` and the full purchase amount), so missing statements are detectable and installment plans can be seen as one purchase
+- **Rates for Analysis** — Monthly ECB exchange rates and TÜİK CPI (optional EVDS key) for comparing spending across years in today's lira or in USD
 - **Security** — Fail-closed auth gate, CSRF protection, login rate limiting and security headers for internet-facing deployment
 - **Migration System** — Alembic-managed schema migrations with autogenerate support
 
@@ -23,8 +26,9 @@ expense-analysis/
 │   ├── models.py           # SQLAlchemy ORM models (User, Expense, Tag, TagRule, Budget, …)
 │   ├── database.py         # Engine & session factory (DATABASE_URL from src.config)
 │   ├── web.py              # Flask app & REST API
+│   ├── insights_api.py     # Read-only /api/insights/* blueprint
 │   ├── auth.py             # Login/logout routes, auth gate helpers
-│   ├── extensions.py       # Unbound Flask extensions (CSRF, rate limiter)
+│   ├── extensions.py       # Unbound Flask extensions (CSRF, rate limiter, with_db)
 │   ├── users.py            # Owner resolution for CLI / ingestion entry points
 │   ├── seeding.py          # Per-user default tag & rule seeding
 │   ├── ingest.py           # Shared transaction ingestion (dedup, statement_period)
@@ -33,6 +37,14 @@ expense-analysis/
 │   ├── gmail_client.py     # Gmail API client (global token or per-user token JSON)
 │   ├── gmail_oauth.py      # Web OAuth flow for connecting a user's Gmail
 │   ├── processor.py        # Email processing pipeline (iterates connected users)
+│   ├── backfill.py         # One-off: link existing expenses to statements, in place
+│   ├── analytics/          # Spend dataset for insights
+│   │   ├── dataset.py      # load_spend(): payments out, billed/purchased basis
+│   │   ├── coverage.py     # Which months the imported statements fully cover
+│   │   ├── rates.py        # Monthly FX + CPI, lens conversions
+│   │   ├── merchant.py     # Merchant-name normalization
+│   │   ├── trend.py        # "Am I spending more?" maths
+│   │   └── months.py       # YYYY-MM helpers
 │   ├── config.py           # Application configuration
 │   └── parsers/
 │       ├── base.py         # Parser interface (BankParser)
@@ -49,6 +61,8 @@ expense-analysis/
 │   ├── backup_tags.py      # Dump tags & rules back to YAML
 │   ├── create_user.py      # Create (or reset) an account
 │   ├── parse_pdf.py        # Debug-parse a single PDF
+│   ├── backfill_statements.py  # Link expenses to statements (dry run by default)
+│   ├── fetch_rates.py      # Fetch monthly FX / CPI into the rates table
 │   └── process.py          # Gmail processor (scheduled)
 │
 ├── data/
@@ -64,11 +78,14 @@ expense-analysis/
 │
 ├── templates/              # Jinja2 templates
 │   ├── index.html          # Dashboard shell (Alpine.js, ECharts, TailwindCSS)
+│   ├── insights.html       # Insights page shell
 │   ├── login.html          # Login page
-│   └── partials/           # Header, stats, chart, expenses, budgets, modals
+│   └── partials/           # Shared head and nav, dashboard sections, modals;
+│                           # insights/ holds the insights page sections
 │
 ├── static/
-│   └── app.js              # Dashboard front-end logic (Alpine component)
+│   ├── app.js              # Dashboard front-end logic (Alpine component)
+│   └── insights.js         # Insights page logic (Alpine component)
 │
 ├── tests/                  # unittest suite
 ├── secrets/                # Gmail OAuth credentials & token (gitignored)
@@ -181,9 +198,23 @@ To enable the in-app connect flow, create a **Web application** OAuth client
 4. Enable the Gmail API for the project; add your users as test users (or
    publish the consent screen). Scope used: `gmail.readonly`.
 
-The Connect button is hidden until `secrets/credentials.json` exists. Tokens are
-stored per-user in the database — restrict DB access accordingly (encrypting the
-`gmail_token` column at rest is a reasonable follow-up).
+The Connect button is hidden until both `secrets/credentials.json` exists and a
+token encryption key is configured.
+
+Stored tokens contain a Google refresh token, so they are encrypted at rest with
+Fernet under a dedicated `token_encryption_key`. Generate one with:
+
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Set it as `token_encryption_key` in `config.local.yaml` (or `TOKEN_ENCRYPTION_KEY`
+in the environment). It is deliberately separate from `secret_key` so rotating the
+session secret does not invalidate every stored token.
+
+Without a key, per-user Gmail connect is unavailable — the rest of the app is
+unaffected. Lose the key and connected users simply reconnect; the app reports
+them as disconnected rather than failing.
 
 ### Returning Use
 
@@ -194,6 +225,9 @@ make migrations
 # Fetch new PDFs & import
 make download-pdfs
 make import-pdfs
+
+# Refresh FX / CPI for the insights
+make fetch-rates
 
 # Start the web UI
 make web
@@ -218,6 +252,7 @@ make web
 | `make migrations-status` | Show current migration state and history |
 | `make seed` | Seed tags & rules from `data/seeds/tags.yaml` |
 | `make backup-tags` | Dump tags & rules from the DB back to `data/seeds/tags.yaml` |
+| `make fetch-rates` | Fetch monthly FX (and CPI, with `evds_api_key`) into the `rates` table |
 | `make refresh-db` | Full rebuild: backup tags → reset DB → migrate → seed → download → import → retag |
 
 ### Import & Tagging
@@ -227,6 +262,7 @@ make web
 | `make download-pdfs` | Download PDF attachments from Gmail |
 | `make import-pdfs` | Import all PDFs from `data/pdfs/` |
 | `make import-pdfs-clean` | Clear DB and re-import all PDFs |
+| `make backfill-statements [APPLY=1]` | Link existing expenses to their statements and fill installment fields, in place. Dry run unless `APPLY=1`, which first backs up the DB and every tag set to `data/backups/` |
 | `make retag` | Re-tag all expenses using current rules |
 | `make tag-stats` | Show tagging coverage statistics |
 
@@ -344,6 +380,13 @@ like any other.
 | GET | `/api/budgets` | List budgets (the overall budget first) |
 | POST | `/api/budgets` | Upsert a budget — `{tag_id, amount}`; `tag_id: null` means overall |
 | DELETE | `/api/budgets/:id` | Delete a budget |
+
+### Insights
+
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/insights/meta` | Available lenses, statement coverage per month, rate freshness, tag colours |
+| GET | `/api/insights/trend` | Monthly/annual totals, rolling averages, category mix and year-over-year for `lens`, `basis`, `from`, `to` (`YYYY-MM`) and optional `parent` |
 
 ### Gmail connection
 

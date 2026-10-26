@@ -35,6 +35,19 @@ TRUSTED_PROXIES = int(os.getenv('TRUSTED_PROXIES', 0))
 # Rate limit applied to the login endpoint (brute-force defense).
 LOGIN_RATELIMIT = os.getenv('LOGIN_RATELIMIT', '10 per minute')
 
+# Fernet key for encrypting the per-user Gmail OAuth token at rest. Generate with:
+#   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+# Empty means per-user Gmail connect is unavailable, because a token could only
+# be stored unencrypted. Deliberately separate from SECRET_KEY so rotating the
+# session secret does not destroy every stored token.
+TOKEN_ENCRYPTION_KEY = os.getenv('TOKEN_ENCRYPTION_KEY', '')
+
+# EVDS (TCMB) API key for the CPI series behind the inflation-adjusted
+# ("today's lira") insights lens. Free from https://evds3.tcmb.gov.tr. Empty
+# means CPI is not fetched and that lens is unavailable; the USD lens still
+# works, because FX comes from a keyless source.
+EVDS_API_KEY = os.getenv('EVDS_API_KEY', '')
+
 # Exchange rates to TRY for cross-currency totals, e.g. {"USD": 34.0, "EUR": 37.0}.
 # Empty by default → foreign amounts aren't converted. TRY is always 1.0.
 try:
@@ -63,7 +76,8 @@ def _load_local_config():
     global DATABASE_URL, GMAIL_CREDENTIALS_PATH, GMAIL_TOKEN_PATH
     global CHECK_INTERVAL_MINUTES, BANK_CONFIG
     global SECRET_KEY, SESSION_COOKIE_SECURE, ALLOW_REGISTRATION
-    global TRUSTED_PROXIES, LOGIN_RATELIMIT, EXCHANGE_RATES
+    global TRUSTED_PROXIES, LOGIN_RATELIMIT, EXCHANGE_RATES, TOKEN_ENCRYPTION_KEY
+    global EVDS_API_KEY
 
     if not os.path.exists(LOCAL_CONFIG_PATH):
         return
@@ -94,6 +108,10 @@ def _load_local_config():
         LOGIN_RATELIMIT = local['login_ratelimit']
     if 'exchange_rates' in local:
         EXCHANGE_RATES = {k: float(v) for k, v in (local['exchange_rates'] or {}).items()}
+    if 'token_encryption_key' in local:
+        TOKEN_ENCRYPTION_KEY = local['token_encryption_key']
+    if 'evds_api_key' in local:
+        EVDS_API_KEY = local['evds_api_key']
 
 _load_local_config()
 

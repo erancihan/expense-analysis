@@ -105,9 +105,39 @@
                     </div>
                 </div>
 
-                <!-- Create Auto Rule -->
+                <!-- Add a tag to this expense only. Needs no pattern and does
+                     not re-tag the account, which is what the rule form below
+                     does — one-off merchants have no useful pattern. -->
                 <div class="border-t border-slate-700/50 pt-4">
+                    <label class="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-3">Add Tag</label>
+                    <div class="flex items-end gap-3">
+                        <div class="flex-1">
+                            <select x-model="manualTagId"
+                                    @keydown.enter.prevent="addTagToExpense()"
+                                    class="w-full bg-slate-800/60 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none text-slate-200">
+                                <option value="">Select a tag…</option>
+                                <template x-for="p in tags.filter(t => !t.parent_id)" :key="p.id">
+                                    <optgroup :label="p.icon + ' ' + p.name">
+                                        <option :value="p.id" x-text="p.icon + ' ' + p.name"></option>
+                                        <template x-for="c in tags.filter(t => t.parent_id === p.id)" :key="c.id">
+                                            <option :value="c.id" x-text="'   ' + c.icon + ' ' + c.name"></option>
+                                        </template>
+                                    </optgroup>
+                                </template>
+                            </select>
+                        </div>
+                        <button type="button" @click="addTagToExpense()" :disabled="!manualTagId"
+                                class="px-4 py-2 text-sm font-medium text-white bg-emerald-600 border border-transparent rounded-lg hover:bg-emerald-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-emerald-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap">
+                            Add to this expense
+                        </button>
+                    </div>
+                    <p class="mt-2 text-[11px] text-slate-500">Applies to this expense only. Picking a sub-tag also records its parent.</p>
+                </div>
+
+                <!-- Create Auto Rule -->
+                <div class="border-t border-slate-700/50 pt-4 mt-4">
                     <label class="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-3">Create Auto Rule</label>
+                    <p class="text-[11px] text-slate-500 -mt-2 mb-3">Matches every expense in the account, now and on future imports.</p>
                     <div class="space-y-3">
                         <div>
                             <label class="block text-xs text-slate-500 mb-1">Pattern</label>

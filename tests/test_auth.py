@@ -198,6 +198,45 @@ class IsolationTestCase(unittest.TestCase):
         r = self.client.post('/api/tags', json={'name': 'b_only'})
         self.assertIn(r.status_code, (200, 201))
 
+    def _make_parent_and_child(self):
+        """Returns (parent_id, child_id) for user A."""
+        db = SessionLocal()
+        try:
+            parent = Tag(user_id=self.a, name='p_food', color='#fff', icon='🍽️')
+            db.add(parent)
+            db.flush()
+            child = Tag(user_id=self.a, name='p_grocery', color='#fff', icon='🛒',
+                        parent_id=parent.id)
+            db.add(child)
+            db.commit()
+            return parent.id, child.id
+        finally:
+            db.close()
+
+    def test_tags_api_exposes_parent(self):
+        self._make_parent_and_child()
+        self._login('a@example.com')
+        rows = {t['name']: t for t in self.client.get('/api/tags').get_json()}
+        self.assertIsNone(rows['p_food']['parent_name'])
+        self.assertEqual(rows['p_grocery']['parent_name'], 'p_food')
+        self.assertEqual(rows['p_grocery']['parent_id'], rows['p_food']['id'])
+
+    def test_create_tag_rejects_depth_three(self):
+        _, child_id = self._make_parent_and_child()
+        self._login('a@example.com')
+        r = self.client.post('/api/tags', json={'name': 'organic', 'parent_id': child_id})
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('two levels', r.get_json()['error'])
+
+    def test_cannot_delete_a_tag_that_has_children(self):
+        """Tag.children cascades delete-orphan, so deleting a parent would take
+        its children AND every expense assignment of them with it."""
+        parent_id, _ = self._make_parent_and_child()
+        self._login('a@example.com')
+        r = self.client.delete(f'/api/tags/{parent_id}')
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('child', r.get_json()['error'].lower())
+
     def test_csv_export_is_scoped(self):
         self._login('a@example.com')
         r = self.client.get('/api/expenses/export.csv')
@@ -428,6 +467,18 @@ class GmailWebTestCase(unittest.TestCase):
         r = self.client.get('/gmail/callback?code=abc&state=xyz')
         self.assertEqual(r.status_code, 302)
         self.assertEqual(self._token(), '{"t":"fresh"}')
+
+    @patch('src.web.gmail_oauth.credentials_available', return_value=True)
+    @patch('src.config.TOKEN_ENCRYPTION_KEY', '')
+    def test_status_unavailable_without_encryption_key(self, _mock):
+        self.assertFalse(self.client.get('/api/gmail/status').get_json()['available'])
+
+    @patch('src.web.gmail_oauth.credentials_available', return_value=True)
+    @patch('src.config.TOKEN_ENCRYPTION_KEY', '')
+    def test_connect_without_encryption_key_redirects_home(self, _mock):
+        r = self.client.get('/gmail/connect')
+        self.assertEqual(r.status_code, 302)
+        self.assertTrue(r.headers['Location'].endswith('/'))
 
 
 if __name__ == '__main__':
