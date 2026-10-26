@@ -8,7 +8,6 @@ expenses, tags, and tag rules.
 import logging
 import os
 from datetime import datetime, timedelta
-from functools import wraps
 
 from flask import Flask, jsonify, request, send_from_directory, render_template, redirect, url_for, session, Response
 from flask_login import LoginManager, current_user
@@ -21,7 +20,8 @@ from src.database import SessionLocal
 from src.models import Expense, Tag, TagRule, ExpenseTag, User, Budget
 from src.tag_engine import TagEngine
 from src.auth import auth_bp
-from src.extensions import csrf, limiter
+from src.extensions import csrf, limiter, get_session, with_db
+from src.insights_api import insights_bp
 from src import gmail_oauth, token_crypto
 
 logger = logging.getLogger(__name__)
@@ -75,6 +75,7 @@ def unauthorized():
 
 
 app.register_blueprint(auth_bp)
+app.register_blueprint(insights_bp)
 
 # Allowlisted endpoints reachable without a session. Everything else is denied
 # by default (fail-closed), so new routes are protected unless added here.
@@ -119,29 +120,6 @@ def add_security_headers(response: Response) -> Response:
     return response
 
 
-# ── DB session helper ────────────────────────────────────────────────────────
-
-def get_session() -> Session:
-    return SessionLocal()
-
-
-def with_db(f):
-    """Decorator to inject a DB session and handle cleanup."""
-    @wraps(f)
-    def wrapper(*args, **kwargs):
-        db = get_session()
-        try:
-            result = f(db, *args, **kwargs)
-            return result
-        except Exception as e:
-            db.rollback()
-            logger.error(f"API error in {f.__name__}: {e}", exc_info=True)
-            return jsonify({'error': 'Internal server error'}), 500
-        finally:
-            db.close()
-    return wrapper
-
-
 def _owns_expense(db: Session, expense_id: int) -> bool:
     """True if the expense exists and belongs to the current user."""
     return db.query(Expense.id).filter_by(
@@ -153,7 +131,12 @@ def _owns_expense(db: Session, expense_id: int) -> bool:
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    return render_template('index.html', active_page='dashboard')
+
+
+@app.route('/insights')
+def insights_page():
+    return render_template('insights.html', active_page='insights')
 
 def parse_date_filter(date_str: str, is_end: bool = False):
     if not date_str: return None
